@@ -1,0 +1,103 @@
+# ── Project-specific local-only docs ──────────────────────────────────────────
+# Handover narrative and the documentation standard are local references,
+# not artefacts of the Scintilla codebase itself.
+HANDOVER.md
+development_documentation.md
+
+# ── Build output ──────────────────────────────────────────────────────────────
+build/
+build-*/
+out/
+cmake-build-*/
+install/
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+CMakeScripts/
+cmake_install.cmake
+CTestTestfile.cmake
+Testing/
+_deps/
+compile_commands.json
+Makefile
+
+# Qt generated sources (in case they ever escape the build dir)
+moc_*.cpp
+moc_*.h
+qrc_*.cpp
+ui_*.h
+*.qmlc
+*.jsc
+.qmake.stash
+.qmake.cache
+
+# Compiled objects and libraries
+*.o
+*.obj
+*.lo
+*.slo
+*.a
+*.la
+*.lib
+*.so
+*.so.*
+*.dylib
+*.dll
+*.exe
+*.app
+*.pdb
+*.ilk
+*.exp
+
+# ── Python (preset runtime) ───────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.pyre/
+
+# ── Editor / IDE ──────────────────────────────────────────────────────────────
+# VS Code (workspace settings can be project-specific; ignore by default)
+.vscode/
+# JetBrains
+.idea/
+*.iml
+# Vim
+*.swp
+*.swo
+*~
+# Emacs
+\#*\#
+.\#*
+# Antigravity (per CLAUDE.md dev environment)
+.antigravity/
+
+# ── OS metadata ───────────────────────────────────────────────────────────────
+.DS_Store
+.AppleDouble
+.LSOverride
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# ── Logs and runtime artefacts ────────────────────────────────────────────────
+*.log
+*.tmp
+*.bak
+# Unix core dumps — anchored to repo root so they don't catch src/core/
+/core
+/core.*
+
+# ── Local environment / secrets ───────────────────────────────────────────────
+.env
+.env.local
+*.local

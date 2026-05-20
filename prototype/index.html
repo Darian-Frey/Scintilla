@@ -1,0 +1,557 @@
+
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+.lc-app{display:flex;flex-direction:column;height:700px;font-family:var(--font-sans);font-size:13px;color:var(--color-text-primary)}
+.lc-bar{display:flex;align-items:center;gap:6px;padding:6px 10px;border-bottom:.5px solid var(--color-border-tertiary);flex-shrink:0;flex-wrap:wrap}
+.lc-main{display:grid;grid-template-columns:176px 1fr 148px;flex:1;overflow:hidden;min-height:0}
+.lc-left{border-right:.5px solid var(--color-border-tertiary);padding:10px;overflow-y:auto;display:flex;flex-direction:column;gap:14px}
+.lc-right{border-left:.5px solid var(--color-border-tertiary);padding:10px;display:flex;flex-direction:column;gap:12px;overflow-y:auto}
+#lc-wrap{position:relative;background:#06060f;overflow:hidden}
+#lc-cvs{display:block;width:100%;height:100%}
+.lc-tl{display:flex;align-items:center;gap:5px;padding:6px 10px;border-top:.5px solid var(--color-border-tertiary);overflow-x:auto;flex-shrink:0;min-height:62px}
+.sec{font-size:10px;font-weight:500;letter-spacing:.06em;text-transform:uppercase;color:var(--color-text-secondary);margin-bottom:5px}
+.tbtn{padding:5px 8px;border:.5px solid var(--color-border-secondary);border-radius:var(--border-radius-md);background:transparent;cursor:pointer;font-size:13px;color:var(--color-text-primary);display:inline-flex;align-items:center;gap:4px;white-space:nowrap}
+.tbtn:hover{background:var(--color-background-secondary)}
+.tbtn.on{background:var(--color-background-secondary);border-color:var(--color-border-primary)}
+.tbtn i{font-size:15px}
+.fcell{width:42px;height:42px;border:.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-md);cursor:pointer;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:11px;color:var(--color-text-secondary);background:#0e0e1a;position:relative;user-select:none}
+.fcell.act{border:1.5px solid #7F77DD;color:#ababff}
+.rgb-row{display:flex;align-items:center;gap:5px}
+.rgb-ch{font-size:11px;font-weight:500;width:10px}
+.rgb-n{font-size:11px;min-width:26px;text-align:right}
+.sw{width:20px;height:20px;border-radius:4px;border:.5px solid rgba(128,128,200,.2);cursor:pointer;flex-shrink:0;transition:transform .1s}
+.sw:hover{transform:scale(1.2)}
+.sw-grid{display:flex;flex-wrap:wrap;gap:4px}
+.hint{position:absolute;bottom:7px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,.6);color:rgba(255,255,255,.45);font-size:10px;padding:2px 10px;border-radius:20px;pointer-events:none;white-space:nowrap}
+.col-preview{width:34px;height:34px;border-radius:var(--border-radius-md);border:.5px solid rgba(200,200,255,.15);flex-shrink:0}
+input[type=range]{width:100%}
+label{font-size:12px;color:var(--color-text-secondary)}
+.vstack{display:flex;flex-direction:column;gap:5px;margin-top:5px}
+.chk-row{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--color-text-primary);cursor:pointer}
+</style>
+
+<h2 class="sr-only">Virtual LED Cube — interactive 3D voxel editor with animation timeline</h2>
+
+<div class="lc-app">
+
+  <div class="lc-bar">
+    <i class="ti ti-box" aria-hidden="true" style="font-size:17px;color:var(--color-text-secondary)"></i>
+    <span style="font-weight:500;margin-right:2px">LED Cube</span>
+
+    <label style="display:flex;align-items:center;gap:5px">
+      <span>Shape</span>
+      <select id="lc-shape" style="font-size:12px">
+        <option value="cube">Cube</option>
+        <option value="sphere">Sphere</option>
+        <option value="cylinder">Cylinder</option>
+        <option value="pyramid">Pyramid</option>
+      </select>
+    </label>
+
+    <label style="display:flex;align-items:center;gap:5px">
+      <span>Size</span>
+      <input type="range" id="lc-size" min="3" max="24" value="8" step="1" style="width:66px">
+      <span id="lc-size-val" style="font-size:12px;min-width:28px;color:var(--color-text-primary)">8³</span>
+    </label>
+
+    <div style="display:flex;gap:3px">
+      <button class="tbtn on" id="t-paint" title="Paint"><i class="ti ti-pencil"></i></button>
+      <button class="tbtn" id="t-erase" title="Erase"><i class="ti ti-eraser"></i></button>
+      <button class="tbtn" id="t-fill" title="Fill slice"><i class="ti ti-paint"></i></button>
+      <button class="tbtn" id="t-pick" title="Pick colour"><i class="ti ti-eyeglass"></i></button>
+    </div>
+
+    <div style="display:flex;gap:3px;margin-left:auto">
+      <button class="tbtn" id="lc-play"><i class="ti ti-player-play"></i></button>
+      <button class="tbtn" id="lc-stop"><i class="ti ti-player-stop"></i></button>
+      <label style="display:flex;align-items:center;gap:4px;font-size:12px">FPS
+        <input type="number" id="lc-fps" value="12" min="1" max="60" style="width:38px;font-size:12px;padding:2px 4px">
+      </label>
+    </div>
+
+    <button class="tbtn" id="lc-save" title="Save JSON"><i class="ti ti-download"></i></button>
+    <button class="tbtn" id="lc-loadbtn" title="Load JSON"><i class="ti ti-upload"></i></button>
+    <input type="file" id="lc-file" accept=".json" style="display:none">
+  </div>
+
+  <div class="lc-main">
+
+    <div class="lc-left">
+      <div>
+        <div class="sec">Slice view</div>
+        <div class="vstack">
+          <div><label>X: <span id="sv-x">all</span></label><input type="range" id="sl-x" min="-1" max="7" value="-1"></div>
+          <div><label>Y: <span id="sv-y">all</span></label><input type="range" id="sl-y" min="-1" max="7" value="-1"></div>
+          <div><label>Z: <span id="sv-z">all</span></label><input type="range" id="sl-z" min="-1" max="7" value="-1"></div>
+          <div style="font-size:10px;color:var(--color-text-secondary)">−1 = show all layers</div>
+        </div>
+      </div>
+      <div>
+        <div class="sec">View</div>
+        <div class="vstack">
+          <button class="tbtn" id="lc-resetcam" style="justify-content:center">Reset camera</button>
+          <label class="chk-row"><input type="checkbox" id="chk-ghost" checked> Ghost LEDs</label>
+          <label class="chk-row"><input type="checkbox" id="chk-bounds" checked> Show bounds</label>
+          <label class="chk-row"><input type="checkbox" id="chk-autorot"> Auto-rotate</label>
+        </div>
+      </div>
+      <div>
+        <div class="sec">Frame ops</div>
+        <div class="vstack">
+          <button class="tbtn" id="lc-clearframe" style="justify-content:center">Clear frame</button>
+          <button class="tbtn" id="lc-dupframe" style="justify-content:center">Duplicate</button>
+          <button class="tbtn" id="lc-fillall" style="justify-content:center">Fill all LEDs</button>
+          <button class="tbtn" id="lc-clearall" style="justify-content:center">Clear all frames</button>
+        </div>
+      </div>
+      <div>
+        <div class="sec">Info</div>
+        <div style="font-size:11px;color:var(--color-text-secondary);line-height:1.6" id="lc-info"></div>
+      </div>
+    </div>
+
+    <div id="lc-wrap">
+      <canvas id="lc-cvs"></canvas>
+      <div class="hint">Drag to orbit · Shift+drag pan · Scroll zoom · Click LED to paint</div>
+    </div>
+
+    <div class="lc-right">
+      <div>
+        <div class="sec">Colour</div>
+        <div style="display:flex;align-items:center;gap:8px;margin:7px 0 10px">
+          <div class="col-preview" id="lc-preview" style="background:rgb(255,0,0)"></div>
+          <input type="color" id="lc-picker" value="#ff0000" style="width:42px;height:34px;border:none;padding:0;cursor:pointer;background:none">
+        </div>
+        <div style="display:flex;flex-direction:column;gap:7px">
+          <div class="rgb-row">
+            <span class="rgb-ch" style="color:#f87171">R</span>
+            <input type="range" id="sl-r" min="0" max="255" value="255" style="flex:1">
+            <span class="rgb-n" id="vl-r">255</span>
+          </div>
+          <div class="rgb-row">
+            <span class="rgb-ch" style="color:#4ade80">G</span>
+            <input type="range" id="sl-g" min="0" max="255" value="0" style="flex:1">
+            <span class="rgb-n" id="vl-g">0</span>
+          </div>
+          <div class="rgb-row">
+            <span class="rgb-ch" style="color:#60a5fa">B</span>
+            <input type="range" id="sl-b" min="0" max="255" value="0" style="flex:1">
+            <span class="rgb-n" id="vl-b">0</span>
+          </div>
+        </div>
+      </div>
+      <div>
+        <div class="sec">Palette</div>
+        <div class="sw-grid" id="lc-palette"></div>
+      </div>
+      <div>
+        <div class="sec">Recent</div>
+        <div class="sw-grid" id="lc-recent"></div>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="lc-tl" id="lc-tl">
+    <button class="tbtn" id="lc-addframe" style="flex-shrink:0" title="Add frame"><i class="ti ti-plus"></i></button>
+    <button class="tbtn" id="lc-delframe" style="flex-shrink:0" title="Delete frame"><i class="ti ti-trash"></i></button>
+  </div>
+
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+(() => {
+const PALETTE=[
+  [255,0,0],[255,80,0],[255,200,0],[0,220,0],
+  [0,200,200],[0,100,255],[160,0,255],[255,0,160],
+  [255,120,120],[120,255,120],[120,160,255],[255,255,0],
+  [255,255,255],[180,180,180],[100,100,100],[0,0,0],
+];
+
+let gridSize=8, shape='cube';
+let color=[255,0,0], tool='paint';
+let frameIdx=0, playing=false, playTimer=null;
+let autoRot=false, showGhost=true, showBounds=true;
+let sliceX=-1, sliceY=-1, sliceZ=-1;
+let frames=[{voxels:new Map()}];
+const recentColors=[];
+
+const wrap=document.getElementById('lc-wrap');
+const cvs=document.getElementById('lc-cvs');
+const renderer=new THREE.WebGLRenderer({canvas:cvs,antialias:true});
+renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+renderer.setClearColor(0x06060f,1);
+
+const scene=new THREE.Scene();
+const camera=new THREE.PerspectiveCamera(45,1,.1,500);
+scene.add(new THREE.AmbientLight(0xffffff,.65));
+const dl=new THREE.DirectionalLight(0xffffff,.7);
+dl.position.set(2,3,1.5); scene.add(dl);
+const dl2=new THREE.DirectionalLight(0x4466ff,.2);
+dl2.position.set(-2,-1,-2); scene.add(dl2);
+
+const onGeo=new THREE.SphereGeometry(.38,9,7);
+const offGeo=new THREE.SphereGeometry(.17,6,5);
+let onMesh=null,offMesh=null,boxMesh=null;
+let mask=[],maskSet=new Set();
+
+let camTheta=Math.PI/4, camPhi=Math.PI/3.1, camR=18;
+const camTgt=new THREE.Vector3();
+
+function posCamera(){
+  camera.position.set(
+    camTgt.x+camR*Math.sin(camPhi)*Math.sin(camTheta),
+    camTgt.y+camR*Math.cos(camPhi),
+    camTgt.z+camR*Math.sin(camPhi)*Math.cos(camTheta)
+  );
+  camera.lookAt(camTgt);
+}
+function resetCam(){
+  camTheta=Math.PI/4; camPhi=Math.PI/3.1;
+  camR=gridSize*1.95; camTgt.set(0,0,0);
+}
+
+let drag=false, shiftDrag=false;
+let mdPos={x:0,y:0}, lpPos={x:0,y:0};
+const ray=new THREE.Raycaster();
+const mv=new THREE.Vector2();
+
+function hitIdx(e){
+  const r=wrap.getBoundingClientRect();
+  mv.x=((e.clientX-r.left)/r.width)*2-1;
+  mv.y=-((e.clientY-r.top)/r.height)*2+1;
+  ray.setFromCamera(mv,camera);
+  const tgts=[];
+  if(onMesh) tgts.push(onMesh);
+  if(offMesh) tgts.push(offMesh);
+  const hits=ray.intersectObjects(tgts);
+  return hits.length?hits[0].instanceId:-1;
+}
+
+wrap.addEventListener('contextmenu',e=>e.preventDefault());
+wrap.addEventListener('mousedown',e=>{
+  drag=true; shiftDrag=e.shiftKey;
+  mdPos={x:e.clientX,y:e.clientY};
+  lpPos={x:e.clientX,y:e.clientY};
+});
+wrap.addEventListener('mousemove',e=>{
+  if(!drag) return;
+  const dx=e.clientX-lpPos.x, dy=e.clientY-lpPos.y;
+  lpPos={x:e.clientX,y:e.clientY};
+  if(shiftDrag||e.buttons===4){
+    const right=new THREE.Vector3().crossVectors(
+      camera.getWorldDirection(new THREE.Vector3()),camera.up).normalize();
+    camTgt.addScaledVector(right,-dx*.018);
+    camTgt.addScaledVector(camera.up,dy*.018);
+  } else {
+    camTheta-=dx*.01;
+    camPhi=Math.max(.05,Math.min(Math.PI-.05,camPhi-dy*.01));
+  }
+});
+wrap.addEventListener('mouseup',e=>{
+  drag=false;
+  if(Math.abs(e.clientX-mdPos.x)+Math.abs(e.clientY-mdPos.y)<5) doTool(hitIdx(e));
+});
+wrap.addEventListener('wheel',e=>{
+  camR=Math.max(2,Math.min(200,camR*(1+e.deltaY*.001)));
+  e.preventDefault();
+},{passive:false});
+let lTch=null;
+wrap.addEventListener('touchstart',e=>{lTch=e.touches[0];},{passive:true});
+wrap.addEventListener('touchmove',e=>{
+  if(!lTch) return;
+  const t=e.touches[0];
+  camTheta-=(t.clientX-lTch.clientX)*.01;
+  camPhi=Math.max(.05,Math.min(Math.PI-.05,camPhi-(t.clientY-lTch.clientY)*.01));
+  lTch=t; e.preventDefault();
+},{passive:false});
+
+function doTool(idx){
+  const fr=frames[frameIdx];
+  if(tool==='fill'){
+    mask.forEach(([x,y,z])=>{
+      if((sliceX===-1||x===sliceX)&&(sliceY===-1||y===sliceY)&&(sliceZ===-1||z===sliceZ))
+        fr.voxels.set(`${x},${y},${z}`,[...color]);
+    });
+    pushRecent(color); refreshScene(); refreshTL(); return;
+  }
+  if(idx<0||idx>=mask.length) return;
+  const [x,y,z]=mask[idx];
+  if((sliceX!==-1&&x!==sliceX)||(sliceY!==-1&&y!==sliceY)||(sliceZ!==-1&&z!==sliceZ)) return;
+  const key=`${x},${y},${z}`;
+  if(tool==='paint'){fr.voxels.set(key,[...color]); pushRecent(color);}
+  else if(tool==='erase') fr.voxels.delete(key);
+  else if(tool==='pick'){const c=fr.voxels.get(key); if(c) setColor(c);}
+  refreshScene(); refreshTL();
+}
+
+function buildMask(n,sh){
+  const out=[],c=(n-1)/2,r=c+.5;
+  for(let x=0;x<n;x++) for(let y=0;y<n;y++) for(let z=0;z<n;z++){
+    const dx=x-c,dy=y-c,dz=z-c;
+    let ok=false;
+    if(sh==='cube') ok=true;
+    else if(sh==='sphere') ok=(dx*dx+dy*dy+dz*dz)<=r*r;
+    else if(sh==='cylinder') ok=(dx*dx+dz*dz)<=r*r;
+    else if(sh==='pyramid'){const hw=(1-y/(n-1))*c+.5; ok=Math.abs(dx)<=hw&&Math.abs(dz)<=hw;}
+    if(ok) out.push([x,y,z]);
+  }
+  return out;
+}
+
+function rebuild(){
+  [onMesh,offMesh,boxMesh].forEach(o=>{
+    if(o){scene.remove(o); o.geometry?.dispose(); o.material?.dispose();}
+  });
+  onMesh=offMesh=boxMesh=null;
+  mask=buildMask(gridSize,shape);
+  maskSet=new Set(mask.map(([x,y,z])=>`${x},${y},${z}`));
+  const n=mask.length, off=-(gridSize-1)/2;
+  const d=new THREE.Object3D();
+
+  onMesh=new THREE.InstancedMesh(onGeo,new THREE.MeshLambertMaterial({vertexColors:true}),n);
+  onMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+  scene.add(onMesh);
+
+  if(showGhost){
+    offMesh=new THREE.InstancedMesh(offGeo,new THREE.MeshLambertMaterial({color:0x2a2a66,transparent:true,opacity:.22}),n);
+    for(let i=0;i<n;i++){
+      const [x,y,z]=mask[i];
+      d.position.set(x+off,y+off,z+off); d.scale.set(1,1,1); d.updateMatrix();
+      offMesh.setMatrixAt(i,d.matrix);
+    }
+    offMesh.instanceMatrix.needsUpdate=true;
+    scene.add(offMesh);
+  }
+
+  if(showBounds){
+    boxMesh=new THREE.Mesh(
+      new THREE.BoxGeometry(gridSize,gridSize,gridSize),
+      new THREE.MeshBasicMaterial({color:0x3a3a7a,wireframe:true,transparent:true,opacity:.11})
+    );
+    scene.add(boxMesh);
+  }
+
+  for(const id of['sl-x','sl-y','sl-z']){
+    const el=document.getElementById(id);
+    el.max=gridSize-1;
+    if(parseInt(el.value)>=gridSize) el.value=-1;
+  }
+  refreshScene(); updateInfo();
+}
+
+function refreshScene(){
+  if(!onMesh) return;
+  const off=-(gridSize-1)/2, fr=frames[frameIdx];
+  const d=new THREE.Object3D(), col=new THREE.Color();
+  for(let i=0;i<mask.length;i++){
+    const [x,y,z]=mask[i];
+    const vis=(sliceX===-1||x===sliceX)&&(sliceY===-1||y===sliceY)&&(sliceZ===-1||z===sliceZ);
+    const vx=fr.voxels.get(`${x},${y},${z}`);
+    d.position.set(x+off,y+off,z+off);
+    if(vx&&vis){
+      d.scale.set(1,1,1); d.updateMatrix(); onMesh.setMatrixAt(i,d.matrix);
+      col.setRGB(vx[0]/255,vx[1]/255,vx[2]/255); onMesh.setColorAt(i,col);
+    } else {
+      d.scale.set(0,0,0); d.updateMatrix(); onMesh.setMatrixAt(i,d.matrix);
+      col.setRGB(0,0,0); onMesh.setColorAt(i,col);
+    }
+  }
+  onMesh.instanceMatrix.needsUpdate=true;
+  if(onMesh.instanceColor) onMesh.instanceColor.needsUpdate=true;
+  updateInfo();
+}
+
+function updateInfo(){
+  const fr=frames[frameIdx];
+  const lit=fr.voxels.size;
+  document.getElementById('lc-info').innerHTML=
+    `Shape: ${shape}<br>Grid: ${gridSize}³ (${mask.length} LEDs)<br>Frame ${frameIdx+1}/${frames.length}<br>Lit: ${lit} LEDs`;
+}
+
+function resize(){
+  const w=wrap.clientWidth, h=wrap.clientHeight;
+  renderer.setSize(w,h,false);
+  camera.aspect=w/h; camera.updateProjectionMatrix();
+}
+new ResizeObserver(resize).observe(wrap);
+
+function tick(){
+  requestAnimationFrame(tick);
+  if(autoRot) camTheta+=.006;
+  posCamera();
+  renderer.render(scene,camera);
+}
+
+function setColor(rgb){
+  color=[...rgb];
+  document.getElementById('lc-preview').style.background=`rgb(${rgb})`;
+  document.getElementById('sl-r').value=rgb[0];
+  document.getElementById('sl-g').value=rgb[1];
+  document.getElementById('sl-b').value=rgb[2];
+  document.getElementById('vl-r').textContent=rgb[0];
+  document.getElementById('vl-g').textContent=rgb[1];
+  document.getElementById('vl-b').textContent=rgb[2];
+  document.getElementById('lc-picker').value='#'+rgb.map(v=>v.toString(16).padStart(2,'0')).join('');
+}
+
+function pushRecent(rgb){
+  const key=rgb.join(',');
+  const ex=recentColors.findIndex(c=>c.join(',')===key);
+  if(ex>=0) recentColors.splice(ex,1);
+  recentColors.unshift([...rgb]);
+  if(recentColors.length>16) recentColors.pop();
+  renderRecent();
+}
+
+function makeSwatch(c,el){
+  el.innerHTML=recentColors.map(c=>`<div class="sw" style="background:rgb(${c})" data-c="${c}"></div>`).join('');
+  el.querySelectorAll('.sw').forEach(s=>s.addEventListener('click',()=>setColor(s.dataset.c.split(',').map(Number))));
+}
+function renderRecent(){ makeSwatch(recentColors,document.getElementById('lc-recent')); }
+
+{
+  const el=document.getElementById('lc-palette');
+  el.innerHTML=PALETTE.map(c=>`<div class="sw" style="background:rgb(${c})" data-c="${c}"></div>`).join('');
+  el.querySelectorAll('.sw').forEach(s=>s.addEventListener('click',()=>setColor(s.dataset.c.split(',').map(Number))));
+}
+
+function refreshTL(){
+  const tl=document.getElementById('lc-tl');
+  tl.querySelectorAll('.fcell').forEach(e=>e.remove());
+  const addBtn=document.getElementById('lc-addframe');
+  frames.forEach((f,i)=>{
+    const cell=document.createElement('div');
+    cell.className='fcell'+(i===frameIdx?' act':'');
+    cell.textContent=i+1;
+    const first=[...f.voxels.values()][0];
+    if(first){
+      const dot=document.createElement('div');
+      dot.style.cssText=`position:absolute;bottom:3px;width:6px;height:6px;border-radius:50%;background:rgb(${first})`;
+      cell.appendChild(dot);
+    }
+    cell.addEventListener('click',()=>{frameIdx=i; refreshTL(); refreshScene();});
+    tl.insertBefore(cell,addBtn);
+  });
+}
+
+function startPlay(){
+  if(playing) return; playing=true;
+  const fps=parseInt(document.getElementById('lc-fps').value)||12;
+  playTimer=setInterval(()=>{
+    frameIdx=(frameIdx+1)%frames.length;
+    refreshTL(); refreshScene();
+  },1000/fps);
+  document.getElementById('lc-play').classList.add('on');
+}
+function stopPlay(){
+  if(!playing) return; playing=false;
+  clearInterval(playTimer);
+  document.getElementById('lc-play').classList.remove('on');
+}
+
+function saveJSON(){
+  const data={version:'1.0',shape,gridSize,
+    frames:frames.map(f=>({voxels:Object.fromEntries([...f.voxels].map(([k,v])=>[k,[...v]]))}))};
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:'application/json'}));
+  a.download=`led-cube-${shape}-${gridSize}.json`; a.click();
+}
+function loadJSON(data){
+  gridSize=data.gridSize||8; shape=data.shape||'cube';
+  frames=(data.frames||[{}]).map(f=>({voxels:new Map(Object.entries(f.voxels||{}).map(([k,v])=>[k,v]))}));
+  frameIdx=0;
+  document.getElementById('lc-size').value=gridSize;
+  document.getElementById('lc-size-val').textContent=`${gridSize}³`;
+  document.getElementById('lc-shape').value=shape;
+  sliceX=sliceY=sliceZ=-1;
+  for(const id of['sl-x','sl-y','sl-z']) document.getElementById(id).value=-1;
+  ['x','y','z'].forEach(a=>document.getElementById(`sv-${a}`).textContent='all');
+  resetCam(); rebuild(); refreshTL();
+}
+
+document.getElementById('lc-shape').addEventListener('change',function(){
+  shape=this.value; frames=frames.map(()=>({voxels:new Map()}));
+  rebuild(); refreshTL();
+});
+document.getElementById('lc-size').addEventListener('input',function(){
+  gridSize=parseInt(this.value);
+  document.getElementById('lc-size-val').textContent=`${gridSize}³`;
+  frames=frames.map(()=>({voxels:new Map()}));
+  sliceX=sliceY=sliceZ=-1;
+  for(const id of['sl-x','sl-y','sl-z']) document.getElementById(id).value=-1;
+  ['x','y','z'].forEach(a=>document.getElementById(`sv-${a}`).textContent='all');
+  resetCam(); rebuild(); refreshTL();
+});
+
+['paint','erase','fill','pick'].forEach(t=>{
+  document.getElementById(`t-${t}`).addEventListener('click',()=>{
+    tool=t;
+    document.querySelectorAll('.tbtn[id^="t-"]').forEach(b=>b.classList.remove('on'));
+    document.getElementById(`t-${t}`).classList.add('on');
+  });
+});
+
+document.getElementById('lc-picker').addEventListener('input',function(){
+  const h=this.value;
+  setColor([parseInt(h.slice(1,3),16),parseInt(h.slice(3,5),16),parseInt(h.slice(5,7),16)]);
+});
+['r','g','b'].forEach((ch,i)=>{
+  document.getElementById(`sl-${ch}`).addEventListener('input',function(){
+    color[i]=parseInt(this.value);
+    document.getElementById(`vl-${ch}`).textContent=this.value;
+    document.getElementById('lc-preview').style.background=`rgb(${color})`;
+    document.getElementById('lc-picker').value='#'+color.map(v=>v.toString(16).padStart(2,'0')).join('');
+  });
+});
+
+['x','y','z'].forEach(a=>{
+  document.getElementById(`sl-${a}`).addEventListener('input',function(){
+    const v=parseInt(this.value);
+    if(a==='x') sliceX=v; if(a==='y') sliceY=v; if(a==='z') sliceZ=v;
+    document.getElementById(`sv-${a}`).textContent=v===-1?'all':v;
+    refreshScene();
+  });
+});
+
+document.getElementById('lc-play').addEventListener('click',startPlay);
+document.getElementById('lc-stop').addEventListener('click',stopPlay);
+document.getElementById('lc-addframe').addEventListener('click',()=>{
+  frames.push({voxels:new Map()}); frameIdx=frames.length-1; refreshTL(); refreshScene();
+});
+document.getElementById('lc-delframe').addEventListener('click',()=>{
+  if(frames.length<=1) return;
+  frames.splice(frameIdx,1); frameIdx=Math.min(frameIdx,frames.length-1); refreshTL(); refreshScene();
+});
+document.getElementById('lc-clearframe').addEventListener('click',()=>{
+  frames[frameIdx].voxels.clear(); refreshScene(); refreshTL();
+});
+document.getElementById('lc-dupframe').addEventListener('click',()=>{
+  frames.splice(frameIdx+1,0,{voxels:new Map(frames[frameIdx].voxels)});
+  frameIdx++; refreshTL(); refreshScene();
+});
+document.getElementById('lc-fillall').addEventListener('click',()=>{
+  mask.forEach(([x,y,z])=>frames[frameIdx].voxels.set(`${x},${y},${z}`,[...color]));
+  pushRecent(color); refreshScene(); refreshTL();
+});
+document.getElementById('lc-clearall').addEventListener('click',()=>{
+  frames.forEach(f=>f.voxels.clear()); refreshScene(); refreshTL();
+});
+
+document.getElementById('chk-ghost').addEventListener('change',function(){showGhost=this.checked; rebuild();});
+document.getElementById('chk-bounds').addEventListener('change',function(){showBounds=this.checked; rebuild();});
+document.getElementById('chk-autorot').addEventListener('change',function(){autoRot=this.checked;});
+document.getElementById('lc-resetcam').addEventListener('click',()=>{resetCam();});
+document.getElementById('lc-save').addEventListener('click',saveJSON);
+document.getElementById('lc-loadbtn').addEventListener('click',()=>document.getElementById('lc-file').click());
+document.getElementById('lc-file').addEventListener('change',function(){
+  if(!this.files[0]) return;
+  const r=new FileReader();
+  r.onload=e=>{try{loadJSON(JSON.parse(e.target.result))}catch{alert('Invalid JSON');}};
+  r.readAsText(this.files[0]);
+});
+
+resize(); resetCam(); rebuild(); refreshTL(); tick();
+})();
+</script>
