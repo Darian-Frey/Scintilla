@@ -3,7 +3,6 @@
 #include <QDebug>
 #include <QMouseEvent>
 #include <QWheelEvent>
-#include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <limits>
@@ -406,10 +405,16 @@ int CubeViewport::pickInstance(QPoint screenPos) {
     int   best  = -1;
     float bestT = std::numeric_limits<float>::infinity();
 
-    const auto& ghosts = m_instances.ghostInstances();
+    const auto& positions = m_mask->positions();
 
     for (int i = 0; i < m_instances.count(); ++i) {
-        if (ghosts[static_cast<size_t>(i)].scale < 0.001f) continue;   // slice-hidden
+        // DEC-004: slice filter prevents painting on hidden layers. Now that
+        // ghost LEDs render through the slice (SPEC §3.7), we consult the
+        // slice values directly rather than using ghost.scale as a proxy.
+        const auto& p = positions[static_cast<size_t>(i)];
+        if (m_sliceX >= 0 && p.x != m_sliceX) continue;
+        if (m_sliceY >= 0 && p.y != m_sliceY) continue;
+        if (m_sliceZ >= 0 && p.z != m_sliceZ) continue;
 
         float ix, iy, iz;
         if (!m_instances.instancePosition(i, ix, iy, iz)) continue;

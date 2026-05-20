@@ -32,7 +32,7 @@ find_package(Qt6 6.2 REQUIRED COMPONENTS
 # add_library(kissfft STATIC third_party/kissfft/kiss_fft.c)
 # target_include_directories(kissfft PUBLIC third_party/kissfft)
 
-# ── Sources (Phase 1 — core renderer) ─────────────────────────────────────────
+# ── Sources (Phase 1 + Phase 2 — core renderer + editor UI) ───────────────────
 set(SOURCES
     src/main.cpp
     src/MainWindow.cpp
@@ -40,10 +40,16 @@ set(SOURCES
     src/core/VoxelFrame.cpp
     src/core/ShapeMask.cpp
     src/core/AnimationTimeline.cpp
+    src/core/JsonSerializer.cpp
 
     src/renderer/CubeViewport.cpp
     src/renderer/OrbitCamera.cpp
     src/renderer/LedInstanceBuffer.cpp
+
+    src/ui/ColorPickerWidget.cpp
+    src/ui/SliceControlWidget.cpp
+    src/ui/TimelineWidget.cpp
+    src/ui/FrameInfoPanel.cpp
 )
 
 set(HEADERS
@@ -57,22 +63,12 @@ set(HEADERS
     src/renderer/CubeViewport.h
     src/renderer/OrbitCamera.h
     src/renderer/LedInstanceBuffer.h
-)
 
-# Phase 2 — uncomment when implementing the editor UI panels.
-# list(APPEND SOURCES
-#     src/core/JsonSerializer.cpp
-#     src/ui/ColorPickerWidget.cpp
-#     src/ui/TimelineWidget.cpp
-#     src/ui/SliceControlWidget.cpp
-#     src/ui/FrameInfoPanel.cpp
-# )
-# list(APPEND HEADERS
-#     src/ui/ColorPickerWidget.h
-#     src/ui/TimelineWidget.h
-#     src/ui/SliceControlWidget.h
-#     src/ui/FrameInfoPanel.h
-# )
+    src/ui/ColorPickerWidget.h
+    src/ui/SliceControlWidget.h
+    src/ui/TimelineWidget.h
+    src/ui/FrameInfoPanel.h
+)
 
 # Phase 3 — uncomment when implementing the audio pipeline.
 # list(APPEND SOURCES

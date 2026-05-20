@@ -18,5 +18,7 @@ void main() {
     vec3  N    = normalize(vNormal);
     float lit  = max(dot(N, normalize(vec3(0.3, 0.6, 0.7))), 0.0) * 0.55 + 0.45;
 
-    fragColor = vec4(kGhostColor * lit, kGhostOpacity);
+    // Opacity scales with vScale: active ghosts (scale=1.0) render at full
+    // opacity; slice-hidden ghosts (scale<1.0) fade to a vague outline.
+    fragColor = vec4(kGhostColor * lit, kGhostOpacity * vScale);
 }

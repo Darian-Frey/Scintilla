@@ -26,6 +26,11 @@ void LedInstanceBuffer::rebuildFor(const ShapeMask& mask) {
 }
 
 namespace {
+    // Slice-hidden ghosts render smaller and dimmer so the active editing
+    // layer stands out clearly. Geometry size scales linearly with iScale
+    // in ghost.vert; opacity scales with vScale in ghost.frag.
+    constexpr float kHiddenGhostDim = 0.4f;
+
     bool sliceHidesLed(int x, int y, int z, int sx, int sy, int sz) {
         if (sx >= 0 && x != sx) return true;
         if (sy >= 0 && y != sy) return true;
@@ -46,10 +51,11 @@ void LedInstanceBuffer::updateFrame(const ShapeMask& mask,
         const auto& p     = positions[i];
         const bool hidden = sliceHidesLed(p.x, p.y, p.z, sliceX, sliceY, sliceZ);
 
-        // Ghost LED: visible iff the mask cell is not slice-filtered.
-        m_ghost[i].scale = hidden ? 0.0f : 1.0f;
+        // Ghost LED: always visible (SPEC §3.7), but slice-hidden ghosts render
+        // smaller and dimmer so the active editing layer is visually distinct.
+        m_ghost[i].scale = hidden ? kHiddenGhostDim : 1.0f;
 
-        // On LED: lit colour from frame, scale = 1 if lit & not hidden.
+        // On LED: lit colour from frame, scale = 1 if lit & not slice-hidden.
         auto lit = frame.get(p.x, p.y, p.z);
         if (!lit || hidden) {
             m_on[i].scale = 0.0f;
