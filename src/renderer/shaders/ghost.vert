@@ -13,7 +13,8 @@ layout(location = 4) in float iScale;      // offset 24
 uniform mat4 uVP;
 
 // ── Outputs ──────────────────────────────────────────────────────────────────
-out vec3 vNormal;
+out vec3  vNormal;
+out vec3  vColor;     // non-zero for slice-hidden lit cells (the "glow" state)
 out float vScale;
 
 // Ghost LED radius — matches prototype constant 0.17 (DEC-002).
@@ -24,5 +25,6 @@ void main() {
     gl_Position    = uVP * vec4(scaledPos, 1.0);
 
     vNormal = aNormal;
+    vColor  = iColor;
     vScale  = iScale;
 }

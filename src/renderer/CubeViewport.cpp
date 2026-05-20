@@ -42,9 +42,11 @@ CubeViewport::~CubeViewport() {
     };
     del(m_onSphere);
     del(m_offSphere);
-    if (m_boxVao) glDeleteVertexArrays(1, &m_boxVao);
-    if (m_boxVbo) glDeleteBuffers(1,      &m_boxVbo);
-    if (m_boxEbo) glDeleteBuffers(1,      &m_boxEbo);
+    if (m_boxVao)  glDeleteVertexArrays(1, &m_boxVao);
+    if (m_boxVbo)  glDeleteBuffers(1,      &m_boxVbo);
+    if (m_boxEbo)  glDeleteBuffers(1,      &m_boxEbo);
+    if (m_axisVao) glDeleteVertexArrays(1, &m_axisVao);
+    if (m_axisVbo) glDeleteBuffers(1,      &m_axisVbo);
     doneCurrent();
 }
 
@@ -80,8 +82,9 @@ void CubeViewport::setSlice(int x, int y, int z) {
     refreshFrame();
 }
 
-void CubeViewport::setShowGhost(bool show)  { m_showGhost  = show; update(); }
-void CubeViewport::setShowBounds(bool show) { m_showBounds = show; update(); }
+void CubeViewport::setShowGhost(bool show)     { m_showGhost     = show; update(); }
+void CubeViewport::setShowBounds(bool show)    { m_showBounds    = show; update(); }
+void CubeViewport::setShowAxisGizmo(bool show) { m_showAxisGizmo = show; update(); }
 
 void CubeViewport::setAutoRotate(bool on) {
     if (on) m_rotTimer.start(kRotTimerMs);
@@ -122,6 +125,7 @@ void CubeViewport::initializeGL() {
     buildSphereGeometry(m_onSphere,  kOnLonSegs,    kOnLatSegs);
     buildSphereGeometry(m_offSphere, kGhostLonSegs, kGhostLatSegs);
     buildBoxGeometry();
+    buildAxisGizmo();
 
     m_initialized = true;
     if (m_mask) uploadScene();
@@ -175,6 +179,9 @@ void CubeViewport::paintGL() {
         m_gridProg->release();
         glDepthMask(GL_TRUE);
     }
+
+    // ─── Corner orientation gizmo (F-042) ────────────────────────────────────
+    if (m_showAxisGizmo) paintAxisGizmo();
 }
 
 // ── Mouse / wheel ────────────────────────────────────────────────────────────
@@ -320,6 +327,92 @@ void CubeViewport::buildShaders() {
     m_ledProg   = compile(":/shaders/led.vert",   ":/shaders/led.frag");
     m_ghostProg = compile(":/shaders/ghost.vert", ":/shaders/ghost.frag");
     m_gridProg  = compile(":/shaders/grid.vert",  ":/shaders/grid.frag");
+    m_axisProg  = compile(":/shaders/axis.vert",  ":/shaders/axis.frag");
+}
+
+// ── Axis gizmo (F-042) ───────────────────────────────────────────────────────
+//
+// Three coloured line segments from origin to +X/+Y/+Z with bright dots at
+// the tips, rendered in a small corner viewport that shares the main camera's
+// rotation but uses fixed radius/target. Industry-standard XYZ → R/G/B
+// convention (Blender, Maya, Houdini).
+
+void CubeViewport::buildAxisGizmo() {
+    // 6 vertices: pairs of (origin, +axis_tip), one pair per axis.
+    // Each vertex: 3 floats position + 3 floats colour (R, G, B).
+    constexpr float kAxisLen = 1.0f;
+    const float verts[] = {
+        // +X axis — red
+        0.0f,    0.0f, 0.0f,   1.0f, 0.25f, 0.25f,
+        kAxisLen,0.0f, 0.0f,   1.0f, 0.25f, 0.25f,
+        // +Y axis — green
+        0.0f, 0.0f,    0.0f,   0.30f, 1.0f, 0.30f,
+        0.0f, kAxisLen,0.0f,   0.30f, 1.0f, 0.30f,
+        // +Z axis — blue
+        0.0f, 0.0f, 0.0f,      0.40f, 0.55f, 1.0f,
+        0.0f, 0.0f, kAxisLen,  0.40f, 0.55f, 1.0f,
+    };
+
+    if (!m_axisVao) glGenVertexArrays(1, &m_axisVao);
+    if (!m_axisVbo) glGenBuffers(1, &m_axisVbo);
+
+    glBindVertexArray(m_axisVao);
+    glBindBuffer(GL_ARRAY_BUFFER, m_axisVbo);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(verts), verts, GL_STATIC_DRAW);
+
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), nullptr);
+    glEnableVertexAttribArray(1);
+    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float),
+                          reinterpret_cast<void*>(3 * sizeof(float)));
+    glBindVertexArray(0);
+}
+
+void CubeViewport::paintAxisGizmo() {
+    // Save the main viewport so we can restore at the end.
+    GLint savedVP[4];
+    glGetIntegerv(GL_VIEWPORT, savedVP);
+
+    // Place an 80×80 gizmo in the bottom-left of the widget (GL origin is
+    // bottom-left, so this works without a Y flip).
+    constexpr int kSize = 80;
+    constexpr int kPad  = 12;
+    glViewport(kPad, kPad, kSize, kSize);
+
+    // Don't write or test depth — draw straight over whatever's there.
+    glDisable(GL_DEPTH_TEST);
+
+    // View/projection: share the main camera's rotation, but at fixed radius
+    // and target. Aspect = 1 since the viewport is square.
+    OrbitCamera gizmoCam;
+    gizmoCam.setTheta(m_camera.theta());
+    gizmoCam.setPhi(m_camera.phi());
+    gizmoCam.setRadius(3.0f);
+    gizmoCam.setTarget(QVector3D(0.0f, 0.0f, 0.0f));
+    const QMatrix4x4 gizmoVP = gizmoCam.projMatrix(1.0f) * gizmoCam.viewMatrix();
+
+    m_axisProg->bind();
+    m_axisProg->setUniformValue("uVP", gizmoVP);
+    glBindVertexArray(m_axisVao);
+
+    glLineWidth(2.0f);
+    glDrawArrays(GL_LINES, 0, 6);
+
+    // Bright dots at the +X / +Y / +Z tips so the user can tell positive
+    // from negative direction at a glance.
+    glEnable(GL_PROGRAM_POINT_SIZE);
+    glDrawArrays(GL_POINTS, 1, 1);
+    glDrawArrays(GL_POINTS, 3, 1);
+    glDrawArrays(GL_POINTS, 5, 1);
+    glDisable(GL_PROGRAM_POINT_SIZE);
+
+    glLineWidth(1.0f);
+    glBindVertexArray(0);
+    m_axisProg->release();
+
+    // Restore state for any subsequent passes (and the next frame).
+    glEnable(GL_DEPTH_TEST);
+    glViewport(savedVP[0], savedVP[1], savedVP[2], savedVP[3]);
 }
 
 void CubeViewport::setupVAOs() {

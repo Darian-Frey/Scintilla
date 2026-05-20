@@ -41,6 +41,7 @@ public:
 
     void setShowGhost(bool show);
     void setShowBounds(bool show);
+    void setShowAxisGizmo(bool show);
     void setAutoRotate(bool on);
 
     // ── Immediate updates (called from MainWindow when state changes) ─────────
@@ -71,6 +72,8 @@ private:
     };
     void buildSphereGeometry(SphereGeo& out, int lonSegs, int latSegs);
     void buildBoxGeometry();
+    void buildAxisGizmo();
+    void paintAxisGizmo();
     void buildShaders();
     void setupVAOs();
     void uploadScene();   // rebuild instances → upload → setup VAOs
@@ -81,10 +84,13 @@ private:
     GLuint m_boxVao = 0, m_boxVbo = 0, m_boxEbo = 0;
     int    m_boxLineCount = 0;
 
+    GLuint m_axisVao = 0, m_axisVbo = 0;   // 6 coloured vertices: 3 line segments + tips
+
     // ── Shader programs ───────────────────────────────────────────────────────
     std::unique_ptr<QOpenGLShaderProgram> m_ledProg;
     std::unique_ptr<QOpenGLShaderProgram> m_ghostProg;
     std::unique_ptr<QOpenGLShaderProgram> m_gridProg;
+    std::unique_ptr<QOpenGLShaderProgram> m_axisProg;
 
     // ── Instance buffer ───────────────────────────────────────────────────────
     LedInstanceBuffer m_instances;
@@ -97,9 +103,10 @@ private:
     Tool        m_tool       = Tool::Paint;
     RGB         m_paintColor = {255, 0, 0};
     int         m_sliceX     = -1, m_sliceY = -1, m_sliceZ = -1;
-    bool        m_showGhost  = true;
-    bool        m_showBounds = true;
-    bool        m_initialized = false;   // initializeGL has run
+    bool        m_showGhost     = true;
+    bool        m_showBounds    = true;
+    bool        m_showAxisGizmo = true;
+    bool        m_initialized   = false;   // initializeGL has run
 
     // ── Auto-rotate ───────────────────────────────────────────────────────────
     QTimer m_rotTimer;

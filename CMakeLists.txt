@@ -108,6 +108,8 @@ qt_add_resources(Scintilla "shaders"
         src/renderer/shaders/ghost.frag
         src/renderer/shaders/grid.vert
         src/renderer/shaders/grid.frag
+        src/renderer/shaders/axis.vert
+        src/renderer/shaders/axis.frag
 )
 
 # ── Link ──────────────────────────────────────────────────────────────────────

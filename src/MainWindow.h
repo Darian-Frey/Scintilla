@@ -48,6 +48,7 @@ private slots:
 
     void onToggleGhost(bool on);
     void onToggleBounds(bool on);
+    void onToggleAxisGizmo(bool on);
     void onToggleAutoRotate(bool on);
     void onResetCamera();
 

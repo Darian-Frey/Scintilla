@@ -29,7 +29,13 @@ namespace {
     // Slice-hidden ghosts render smaller and dimmer so the active editing
     // layer stands out clearly. Geometry size scales linearly with iScale
     // in ghost.vert; opacity scales with vScale in ghost.frag.
-    constexpr float kHiddenGhostDim = 0.4f;
+    //
+    // Slice-hidden cells that ARE lit (painted on another layer) render at
+    // an intermediate scale and use a higher base opacity (kGlowOpacity in
+    // ghost.frag), so the user can see which voxels are painted across the
+    // whole cube while editing one slice.
+    constexpr float kHiddenGhostDim   = 0.4f;
+    constexpr float kHiddenLitGlow    = 0.55f;
 
     bool sliceHidesLed(int x, int y, int z, int sx, int sy, int sz) {
         if (sx >= 0 && x != sx) return true;
@@ -50,13 +56,28 @@ void LedInstanceBuffer::updateFrame(const ShapeMask& mask,
     for (size_t i = 0; i < positions.size(); ++i) {
         const auto& p     = positions[i];
         const bool hidden = sliceHidesLed(p.x, p.y, p.z, sliceX, sliceY, sliceZ);
+        auto       lit    = frame.get(p.x, p.y, p.z);
 
-        // Ghost LED: always visible (SPEC §3.7), but slice-hidden ghosts render
-        // smaller and dimmer so the active editing layer is visually distinct.
-        m_ghost[i].scale = hidden ? kHiddenGhostDim : 1.0f;
+        // Ghost LED: always visible (SPEC §3.7). Three states:
+        //   - active slice          → full size, default grey
+        //   - hidden + unlit        → small, dim grey ("vague outline")
+        //   - hidden + lit          → medium, COLOURED glow (paint visible
+        //                             across layers while slicing)
+        // ghost.frag interprets a non-zero colour as the glow state.
+        if (!hidden) {
+            m_ghost[i].scale = 1.0f;
+            m_ghost[i].r = m_ghost[i].g = m_ghost[i].b = 0.0f;
+        } else if (lit) {
+            m_ghost[i].scale = kHiddenLitGlow;
+            m_ghost[i].r = static_cast<float>((*lit)[0]) / 255.0f;
+            m_ghost[i].g = static_cast<float>((*lit)[1]) / 255.0f;
+            m_ghost[i].b = static_cast<float>((*lit)[2]) / 255.0f;
+        } else {
+            m_ghost[i].scale = kHiddenGhostDim;
+            m_ghost[i].r = m_ghost[i].g = m_ghost[i].b = 0.0f;
+        }
 
         // On LED: lit colour from frame, scale = 1 if lit & not slice-hidden.
-        auto lit = frame.get(p.x, p.y, p.z);
         if (!lit || hidden) {
             m_on[i].scale = 0.0f;
             m_on[i].r = m_on[i].g = m_on[i].b = 0.0f;

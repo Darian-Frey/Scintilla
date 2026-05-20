@@ -104,9 +104,10 @@ void MainWindow::buildMenus() {
         connect(a, &QAction::toggled, this, slot);
         return a;
     };
-    add_toggle(tr("Show &Ghost LEDs"),  true,  &MainWindow::onToggleGhost);
-    add_toggle(tr("Show &Bounds"),       true,  &MainWindow::onToggleBounds);
-    add_toggle(tr("&Auto-rotate"),      false, &MainWindow::onToggleAutoRotate);
+    add_toggle(tr("Show &Ghost LEDs"),       true,  &MainWindow::onToggleGhost);
+    add_toggle(tr("Show &Bounds"),            true,  &MainWindow::onToggleBounds);
+    add_toggle(tr("Show &Axis indicator"),    true,  &MainWindow::onToggleAxisGizmo);
+    add_toggle(tr("A&uto-rotate"),           false, &MainWindow::onToggleAutoRotate);
     view->addSeparator();
     view->addAction(tr("&Reset camera"), QKeySequence(Qt::Key_R), this, &MainWindow::onResetCamera);
 
@@ -268,6 +269,7 @@ bool MainWindow::saveTo(const QString& path) {
 
 void MainWindow::onToggleGhost(bool on)      { m_viewport->setShowGhost(on); }
 void MainWindow::onToggleBounds(bool on)     { m_viewport->setShowBounds(on); }
+void MainWindow::onToggleAxisGizmo(bool on)  { m_viewport->setShowAxisGizmo(on); }
 void MainWindow::onToggleAutoRotate(bool on) { m_viewport->setAutoRotate(on); }
 void MainWindow::onResetCamera()             { m_viewport->resetCamera(); }
 
