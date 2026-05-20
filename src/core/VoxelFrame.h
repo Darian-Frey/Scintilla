@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <cstdint>
 #include <map>
 #include <optional>
 #include <tuple>
@@ -26,8 +27,10 @@ struct VoxelKey {
 class VoxelFrame {
 public:
     VoxelFrame() = default;
-    explicit VoxelFrame(const VoxelFrame&) = default;
+    VoxelFrame(const VoxelFrame&)            = default;
     VoxelFrame& operator=(const VoxelFrame&) = default;
+    VoxelFrame(VoxelFrame&&) noexcept        = default;
+    VoxelFrame& operator=(VoxelFrame&&) noexcept = default;
 
     void set(int x, int y, int z, uint8_t r, uint8_t g, uint8_t b);
     void set(VoxelKey key, RGB color);

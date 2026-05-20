@@ -65,17 +65,18 @@ protected:
 
 private:
     // ── GL resources ─────────────────────────────────────────────────────────
-    void buildSphereGeometry(float radius, int lonSegs, int latSegs);
-    void buildBoxGeometry();
-    void buildShaders();
-    void setupVAOs();
-
     struct SphereGeo {
         GLuint vao = 0, vbo = 0, ebo = 0;
         int indexCount = 0;
     };
-    SphereGeo m_onSphere;    // radius 0.38, 9×7 segments
-    SphereGeo m_offSphere;   // radius 0.17, 6×5 segments
+    void buildSphereGeometry(SphereGeo& out, int lonSegs, int latSegs);
+    void buildBoxGeometry();
+    void buildShaders();
+    void setupVAOs();
+    void uploadScene();   // rebuild instances → upload → setup VAOs
+
+    SphereGeo m_onSphere;    // unit sphere, 9×7 segments — shader applies r=0.38
+    SphereGeo m_offSphere;   // unit sphere, 6×5 segments — shader applies r=0.17
 
     GLuint m_boxVao = 0, m_boxVbo = 0, m_boxEbo = 0;
     int    m_boxLineCount = 0;
@@ -98,6 +99,7 @@ private:
     int         m_sliceX     = -1, m_sliceY = -1, m_sliceZ = -1;
     bool        m_showGhost  = true;
     bool        m_showBounds = true;
+    bool        m_initialized = false;   // initializeGL has run
 
     // ── Auto-rotate ───────────────────────────────────────────────────────────
     QTimer m_rotTimer;

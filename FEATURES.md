@@ -248,3 +248,4 @@ Hobbyists and visual artists designing 3D LED animations — for the screen, for
 - **F-038** Custom user-editable palettes.
 - **F-039** Custom imported mesh as shape mask.
 - **F-040** Rotation keyframes for camera fly-through export.
+- **F-041** Per-axis layer visibility toggles. Hide arbitrary layers along X, Y, or Z (multiple at once) so interior voxels become reachable by ray-pick. Extends F-008 single-slice view from "show one layer" to "hide any subset of layers." Motivation: ray-cast picking always lands on the outermost LED along the click ray; without a visibility filter, interior layers are unreachable. Surfaced during Phase 1 viewport testing on 2026-05-20.

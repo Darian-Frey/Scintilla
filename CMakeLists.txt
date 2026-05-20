@@ -16,14 +16,10 @@ set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 set(CMAKE_AUTOUIC ON)
 
+# Emit compile_commands.json so clangd / IDE tooling can resolve Qt includes.
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
 # ── Dependencies ──────────────────────────────────────────────────────────────
-# PortAudio — system output loopback capture (DEC-009)
-find_package(PortAudio REQUIRED)
-
-# KissFFT — vendored, two files, MIT licence (DEC-010)
-add_library(kissfft STATIC third_party/kissfft/kiss_fft.c)
-target_include_directories(kissfft PUBLIC third_party/kissfft)
-
 find_package(Qt6 6.2 REQUIRED COMPONENTS
     Core
     Widgets
@@ -31,7 +27,12 @@ find_package(Qt6 6.2 REQUIRED COMPONENTS
     OpenGLWidgets
 )
 
-# ── Sources ───────────────────────────────────────────────────────────────────
+# Phase 3 — uncomment when implementing the audio pipeline (DEC-009 / DEC-010).
+# find_package(PortAudio REQUIRED)
+# add_library(kissfft STATIC third_party/kissfft/kiss_fft.c)
+# target_include_directories(kissfft PUBLIC third_party/kissfft)
+
+# ── Sources (Phase 1 — core renderer) ─────────────────────────────────────────
 set(SOURCES
     src/main.cpp
     src/MainWindow.cpp
@@ -39,21 +40,10 @@ set(SOURCES
     src/core/VoxelFrame.cpp
     src/core/ShapeMask.cpp
     src/core/AnimationTimeline.cpp
-    src/core/JsonSerializer.cpp
 
     src/renderer/CubeViewport.cpp
     src/renderer/OrbitCamera.cpp
     src/renderer/LedInstanceBuffer.cpp
-
-    src/ui/ColorPickerWidget.cpp
-    src/ui/TimelineWidget.cpp
-    src/ui/SliceControlWidget.cpp
-    src/ui/FrameInfoPanel.cpp
-
-    src/audio/AudioWorker.cpp
-    src/audio/FFTProcessor.cpp
-    src/audio/AudioReactiveEngine.cpp
-    src/audio/AudioDevicePicker.cpp
 )
 
 set(HEADERS
@@ -67,17 +57,46 @@ set(HEADERS
     src/renderer/CubeViewport.h
     src/renderer/OrbitCamera.h
     src/renderer/LedInstanceBuffer.h
-
-    src/ui/ColorPickerWidget.h
-    src/ui/TimelineWidget.h
-    src/ui/SliceControlWidget.h
-    src/ui/FrameInfoPanel.h
-
-    src/audio/AudioWorker.h
-    src/audio/FFTProcessor.h
-    src/audio/AudioReactiveEngine.h
-    src/audio/AudioDevicePicker.h
 )
+
+# Phase 2 — uncomment when implementing the editor UI panels.
+# list(APPEND SOURCES
+#     src/core/JsonSerializer.cpp
+#     src/ui/ColorPickerWidget.cpp
+#     src/ui/TimelineWidget.cpp
+#     src/ui/SliceControlWidget.cpp
+#     src/ui/FrameInfoPanel.cpp
+# )
+# list(APPEND HEADERS
+#     src/ui/ColorPickerWidget.h
+#     src/ui/TimelineWidget.h
+#     src/ui/SliceControlWidget.h
+#     src/ui/FrameInfoPanel.h
+# )
+
+# Phase 3 — uncomment when implementing the audio pipeline.
+# list(APPEND SOURCES
+#     src/audio/AudioWorker.cpp
+#     src/audio/FFTProcessor.cpp
+#     src/audio/AudioReactiveEngine.cpp
+#     src/audio/AudioDevicePicker.cpp
+# )
+# list(APPEND HEADERS
+#     src/audio/AudioWorker.h
+#     src/audio/FFTProcessor.h
+#     src/audio/AudioReactiveEngine.h
+#     src/audio/AudioDevicePicker.h
+# )
+
+# Phase 4 — uncomment when implementing the preset scripting bridge.
+# list(APPEND SOURCES
+#     src/scripting/PresetRunner.cpp
+#     src/scripting/PresetEditorPanel.cpp
+# )
+# list(APPEND HEADERS
+#     src/scripting/PresetRunner.h
+#     src/scripting/PresetEditorPanel.h
+# )
 
 # ── Executable ────────────────────────────────────────────────────────────────
 add_executable(Scintilla ${SOURCES} ${HEADERS})
@@ -85,6 +104,7 @@ add_executable(Scintilla ${SOURCES} ${HEADERS})
 # ── Shader resources (embedded via Qt resource system) ────────────────────────
 qt_add_resources(Scintilla "shaders"
     PREFIX "/shaders"
+    BASE "src/renderer/shaders"
     FILES
         src/renderer/shaders/led.vert
         src/renderer/shaders/led.frag
@@ -100,9 +120,10 @@ target_link_libraries(Scintilla PRIVATE
     Qt6::Widgets
     Qt6::OpenGL
     Qt6::OpenGLWidgets
-    PortAudio::PortAudio
-    kissfft
 )
+
+# Phase 3 — append to link line when audio comes online.
+# target_link_libraries(Scintilla PRIVATE PortAudio::PortAudio kissfft)
 
 target_include_directories(Scintilla PRIVATE src)
 
