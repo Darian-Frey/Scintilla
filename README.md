@@ -86,6 +86,8 @@ The desktop build is in Phase 1 (core renderer); see [HANDOVER.md](HANDOVER.md) 
 | [DECISIONS.md](DECISIONS.md) | Indexed log of design decisions (DEC-NNN), reversal conditions |
 | [BUILD.md](BUILD.md) | Toolchain, dependencies, build commands, troubleshooting |
 | [ATTACK_VECTORS.md](ATTACK_VECTORS.md) | Project-specific failure modes (AV-NNN), detection methods |
+| [BUGS.md](BUGS.md) | Catalogue of realised bugs (BUG-NNN), open / fixed / wontfix / deferred |
+| [IMPROVEMENTS.md](IMPROVEMENTS.md) | Catalogue of code-quality improvements (IMP-NNN), suggested / applied / declined / deferred |
 | [CHANGELOG.md](CHANGELOG.md) | Version history |
 | [docs/SPEC.md](docs/SPEC.md) | Authoritative feature specification |
 

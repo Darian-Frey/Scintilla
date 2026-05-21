@@ -26,6 +26,7 @@ The early decisions (DEC-001 … DEC-023) live in three thematic files under [`d
 | DEC-024 | Decisions split across thematic files | Accepted | this file |
 | DEC-025 | `HANDOVER.md` as project-specific extension | Accepted | this file |
 | DEC-026 | MIT licence | Accepted | this file |
+| DEC-027 | Adopt `BUGS.md` and `IMPROVEMENTS.md` per updated standard | Accepted | this file |
 
 ---
 
@@ -104,3 +105,32 @@ The early decisions (DEC-001 … DEC-023) live in three thematic files under [`d
 - The Qt6 dependency is LGPLv3, which obliges dynamic linking and the standard LGPL "user can replace the library" clause; this is satisfied by the default Qt-installed-as-shared-library build.
 
 **Reversal conditions.** Revisit only if (a) a contribution-policy issue arises that an explicit patent grant would resolve, or (b) the project takes a corporate funding model that requires CLA-style governance.
+
+---
+
+### DEC-027 Adopt `BUGS.md` and `IMPROVEMENTS.md` per updated standard
+
+**Decided:** 2026-05-21
+**Recorded:** 2026-05-21
+**Status:** Accepted
+**Authors:** Shane Hartley
+**Related:** `BUGS.md`, `IMPROVEMENTS.md`, `development_documentation.md` 2026-05-21 revision, Maintenance Rule 8 ("log when found, not silently acted on")
+
+**Context.** The `development_documentation.md` standard was revised on 2026-05-21 to add two new Tier 2 document types — `BUGS.md` (realised failures, backward-looking, `BUG-NNN` IDs) and `IMPROVEMENTS.md` (candidate refactors, `IMP-NNN` IDs) — plus a new Maintenance Rule 8 making the "log discoveries, don't silently act" discipline explicit. The rule is called out as load-bearing for AI-partner workflows specifically, which describes Scintilla precisely (solo developer + Claude Code).
+
+**Options.**
+
+- **A. Adopt both documents now and backfill from the existing commit history.** Chosen. The friction test passes immediately: Phase 1 and Phase 2 already produced 7 bugs and 4 internal refactors that would otherwise survive only as commit-message footnotes. Future revival or audit benefits from the catalogue.
+- **B. Defer until the first uncatalogued bug or improvement is missed.** Rejected — the recall window for the existing commit history is already closing; the longer we wait, the more detail we lose.
+- **C. Adopt the rule but skip the documents and rely on commit messages alone.** Rejected — commit messages aren't indexed by stable IDs, can't be referenced from CHANGELOG / DECISIONS / ATTACK_VECTORS cross-links, and don't track status (open / wontfix / deferred).
+
+**Decision.** Option A. Created `BUGS.md` and `IMPROVEMENTS.md` at repo root, backfilled `BUG-001…BUG-007` and `IMP-001…IMP-004` from `b5e448b`, `f509844`, and `7b23f96`. `IMP-005` and `IMP-006` added as forward-looking Suggested entries surfaced during the audit. Maintenance Rule 8 is now binding for all future sessions — see the corresponding update in `CLAUDE.md` and the matching feedback memory.
+
+**Consequences.**
+
+- BUGS / IMPROVEMENTS are now part of the cross-reference graph alongside FEATURES, DECISIONS, ATTACK_VECTORS, CLAIMS. Future entries should link both directions.
+- The `BUG-` and `IMP-` ID series join the append-only ID rule (Maintenance Rule 3).
+- CHANGELOG entries should reference BUG- and IMP- IDs where applicable (CHANGELOG `### Fixed` for bugs, `### Changed` for applied improvements).
+- The reserved-names list in DEC-025 (extensions clause) implicitly extends to include `BUGS` and `IMPROVEMENTS` — they're standard Tier 2 names now, not extensions.
+
+**Reversal conditions.** Revisit if (a) the catalogues drift out of date faster than they're maintained (the standard's own discipline failure mode), or (b) Scintilla transitions to using an external bug tracker (GitHub Issues, Linear) as authoritative, at which point BUGS.md becomes redundant per the cost-note friction test.
