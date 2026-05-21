@@ -48,6 +48,13 @@ public:
     void refreshFrame();    // re-upload instance buffer from current frame
     void resetCamera();
 
+    // ── Audio reactive mode (Phase 3, F-018) ──────────────────────────────────
+    // When a reactive frame is set, it replaces the timeline frame in the
+    // viewport without touching the timeline data. Clear with clearReactiveFrame()
+    // to return to normal editor display.
+    void setReactiveFrame(VoxelFrame frame);
+    void clearReactiveFrame();
+
     [[nodiscard]] OrbitCamera& camera() { return m_camera; }
 
 signals:
@@ -107,6 +114,10 @@ private:
     bool        m_showBounds    = true;
     bool        m_showAxisGizmo = true;
     bool        m_initialized   = false;   // initializeGL has run
+
+    // Optional reactive override: when set, takes precedence over m_timeline.
+    bool        m_haveReactive  = false;
+    VoxelFrame  m_reactiveFrame;
 
     // ── Auto-rotate ───────────────────────────────────────────────────────────
     QTimer m_rotTimer;

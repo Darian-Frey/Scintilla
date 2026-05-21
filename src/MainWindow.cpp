@@ -1,11 +1,14 @@
 #include "MainWindow.h"
 
 #include "renderer/CubeViewport.h"
+#include "ui/AudioReactivePanel.h"
 #include "ui/ColorPickerWidget.h"
 #include "ui/FrameInfoPanel.h"
 #include "ui/SliceControlWidget.h"
 #include "ui/TimelineWidget.h"
 #include "core/JsonSerializer.h"
+#include "audio/AudioReactiveEngine.h"
+#include "audio/AudioDevicePicker.h"
 
 #include <QAction>
 #include <QActionGroup>
@@ -16,7 +19,7 @@
 #include <QKeySequence>
 #include <QMenuBar>
 #include <QMessageBox>
-#include <QSpinBox>
+#include <QScrollArea>
 #include <QStatusBar>
 #include <QToolBar>
 
@@ -31,7 +34,8 @@ namespace {
 MainWindow::MainWindow(QWidget* parent)
     : QMainWindow(parent)
     , m_timeline(std::make_unique<AnimationTimeline>(this))
-    , m_mask(std::make_shared<ShapeMask>(kDefaultGrid, ShapeType::Cube)) {
+    , m_mask(std::make_shared<ShapeMask>(kDefaultGrid, ShapeType::Cube))
+    , m_audioEngine(std::make_unique<AudioReactiveEngine>(this)) {
 
     setWindowTitle(tr("Scintilla"));
     resize(kWindowW, kWindowH);
@@ -42,6 +46,8 @@ MainWindow::MainWindow(QWidget* parent)
     m_viewport->setPaintColor(255, 64, 32);
     setCentralWidget(m_viewport);
 
+    m_audioEngine->setMask(m_mask);
+
     buildDocks();
     buildMenus();
     buildToolbar();
@@ -50,7 +56,11 @@ MainWindow::MainWindow(QWidget* parent)
     statusBar()->showMessage(tr("Ready — paint with left-click, orbit with drag, zoom with wheel."));
 }
 
-MainWindow::~MainWindow() = default;
+MainWindow::~MainWindow() {
+    // Engine stops PortAudio cleanly in its destructor; explicit stop here
+    // ensures the worker thread joins before the timeline is torn down.
+    if (m_audioEngine) m_audioEngine->stop();
+}
 
 // ── Dock construction ────────────────────────────────────────────────────────
 
@@ -64,10 +74,24 @@ void MainWindow::buildDocks() {
         return d;
     };
 
+    // Wraps a panel in a scroll area so the dock can shrink below the panel's
+    // natural sizeHint() — without this every right-side dock contributes its
+    // full preferred height to the window's minimum, and the user can't
+    // resize the window shorter than the sum of all of them.
+    auto scrollable = [](QWidget* inner) -> QWidget* {
+        auto* s = new QScrollArea;
+        s->setWidget(inner);
+        s->setWidgetResizable(true);
+        s->setFrameShape(QFrame::NoFrame);
+        s->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+        return s;
+    };
+
     m_colorPicker    = new ColorPickerWidget(this);
     m_sliceControl   = new SliceControlWidget(this);
     m_frameInfo      = new FrameInfoPanel(this);
     m_timelineWidget = new TimelineWidget(this);
+    m_audioPanel     = new AudioReactivePanel(m_audioEngine.get(), this);
 
     m_sliceControl->setGridSize(m_mask->gridSize());
     m_frameInfo->setMask(m_mask);
@@ -75,10 +99,11 @@ void MainWindow::buildDocks() {
     m_timelineWidget->setTimeline(m_timeline.get());
     m_colorPicker->setCurrentColor(255, 64, 32);
 
-    makeDock(tr("Colour"),    m_colorPicker,    Qt::RightDockWidgetArea);
-    makeDock(tr("Slice"),     m_sliceControl,   Qt::RightDockWidgetArea);
-    makeDock(tr("Frame"),     m_frameInfo,      Qt::RightDockWidgetArea);
-    makeDock(tr("Timeline"),  m_timelineWidget, Qt::BottomDockWidgetArea);
+    makeDock(tr("Colour"),         scrollable(m_colorPicker),  Qt::RightDockWidgetArea);
+    makeDock(tr("Slice"),          scrollable(m_sliceControl), Qt::RightDockWidgetArea);
+    makeDock(tr("Audio reactive"), scrollable(m_audioPanel),   Qt::RightDockWidgetArea);
+    makeDock(tr("Frame"),          scrollable(m_frameInfo),    Qt::RightDockWidgetArea);
+    makeDock(tr("Timeline"),       m_timelineWidget,           Qt::BottomDockWidgetArea);
 }
 
 // ── Menus ────────────────────────────────────────────────────────────────────
@@ -139,6 +164,15 @@ void MainWindow::buildMenus() {
             m_mask->gridSize(), 3, 32, 1, &ok);
         if (ok) onGridSizeChanged(n);
     });
+
+    // ─── Audio ───────────────────────────────────────────────────────────────
+    auto* audio = mbar->addMenu(tr("&Audio"));
+    audio->addAction(tr("Select &input device…"), this, &MainWindow::onPickAudioDevice);
+    audio->addSeparator();
+    m_captureAction = audio->addAction(tr("&Capture to timeline"));
+    m_captureAction->setCheckable(true);
+    m_captureAction->setEnabled(false);   // enabled once a reactive mode is on
+    connect(m_captureAction, &QAction::toggled, this, &MainWindow::onCaptureToggled);
 }
 
 // ── Toolbar (tool selection) ─────────────────────────────────────────────────
@@ -168,6 +202,8 @@ void MainWindow::buildToolbar() {
         m_viewport->setTool(static_cast<Tool>(a->data().toInt()));
         statusBar()->showMessage(tr("Tool: %1").arg(a->text()), 1500);
     });
+    // Audio reactive controls live in their own dock (AudioReactivePanel),
+    // not the toolbar — see buildDocks().
 }
 
 // ── Signal wiring ────────────────────────────────────────────────────────────
@@ -183,6 +219,19 @@ void MainWindow::wireSignals() {
 
     connect(m_sliceControl, &SliceControlWidget::sliceChanged,
             this, &MainWindow::onSliceChanged);
+
+    connect(m_audioEngine.get(), &AudioReactiveEngine::frameReady,
+            this, &MainWindow::onReactiveFrame);
+    connect(m_audioEngine.get(), &AudioReactiveEngine::frameCaptured,
+            this, &MainWindow::onReactiveFrameCaptured);
+    connect(m_audioEngine.get(), &AudioReactiveEngine::errorOccurred,
+            this, &MainWindow::onAudioError);
+
+    // Audio reactive dock → engine lifecycle handled here.
+    connect(m_audioPanel, &AudioReactivePanel::modeChanged,
+            this, &MainWindow::onReactiveModeChanged);
+    connect(m_audioPanel, &AudioReactivePanel::blendChanged,
+            this, &MainWindow::onReactiveBlendChanged);
 }
 
 // ── Slots ────────────────────────────────────────────────────────────────────
@@ -233,10 +282,7 @@ void MainWindow::onOpen() {
             this, tr("Grid size clamped"),
             tr("The file requested a grid size larger than 32; clamped to 32 (DEC-005)."));
     }
-    m_mask = std::move(newMask);
-    m_viewport->setMask(m_mask);
-    m_sliceControl->setGridSize(m_mask->gridSize());
-    m_frameInfo->setMask(m_mask);
+    applyMask(std::move(newMask));
     m_currentPath = path;
     statusBar()->showMessage(tr("Loaded %1").arg(path), 3000);
 }
@@ -292,11 +338,8 @@ void MainWindow::rebuildMask(int gridSize, ShapeType shape) {
     if (!confirmDiscardIfDirty(tr("Changing shape or grid size clears the animation. Continue?"))) {
         return;
     }
-    m_mask = std::make_shared<ShapeMask>(gridSize, shape);
     m_timeline->clearAll();
-    m_viewport->setMask(m_mask);
-    m_sliceControl->setGridSize(gridSize);
-    m_frameInfo->setMask(m_mask);
+    applyMask(std::make_shared<ShapeMask>(gridSize, shape));
 
     if (gridSize > 24) {
         statusBar()->showMessage(
@@ -308,10 +351,113 @@ void MainWindow::rebuildMask(int gridSize, ShapeType shape) {
     }
 }
 
+// Single point of mask propagation — viewport, slice control, info panel,
+// audio engine, and audio base frame all stay in sync (BUG-011).
+void MainWindow::applyMask(std::shared_ptr<ShapeMask> mask) {
+    m_mask = std::move(mask);
+    m_viewport->setMask(m_mask);
+    m_sliceControl->setGridSize(m_mask->gridSize());
+    m_frameInfo->setMask(m_mask);
+    m_audioEngine->setMask(m_mask);
+    if (m_timeline) {
+        m_audioEngine->setBaseFrame(m_timeline->currentFrame());
+    }
+}
+
 bool MainWindow::confirmDiscardIfDirty(const QString& reason) {
     if (!m_timeline || !m_timeline->hasContent()) return true;
     const auto ans = QMessageBox::question(
         this, tr("Discard animation?"), reason,
         QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
     return ans == QMessageBox::Yes;
+}
+
+// ── Audio reactive slots (Phase 3) ───────────────────────────────────────────
+
+void MainWindow::onPickAudioDevice() {
+    AudioDevicePicker dlg(this);
+    if (dlg.exec() != QDialog::Accepted) return;
+    m_audioDeviceIndex = dlg.selectedDeviceIndex();
+    m_audioSampleRate  = dlg.selectedSampleRate();
+    statusBar()->showMessage(
+        tr("Audio device set: index %1 @ %2 Hz")
+            .arg(m_audioDeviceIndex)
+            .arg(static_cast<double>(m_audioSampleRate)),
+        4000);
+}
+
+void MainWindow::onReactiveModeChanged(ReactiveMode mode) {
+    if (mode == ReactiveMode::Off) {
+        m_audioEngine->setMode(ReactiveMode::Off);
+        m_audioEngine->stop();
+        m_viewport->clearReactiveFrame();
+        m_captureAction->setChecked(false);
+        m_captureAction->setEnabled(false);
+        return;
+    }
+
+    if (m_audioDeviceIndex < 0) {
+        QMessageBox::information(
+            this, tr("Pick an audio device first"),
+            tr("Use Audio → Select input device… to choose a monitor / loopback source, "
+               "then re-select the reactive mode."));
+        return;
+    }
+
+    m_audioEngine->setMode(mode);
+    m_audioEngine->setBaseFrame(m_timeline ? m_timeline->currentFrame() : VoxelFrame());
+    if (!m_audioEngine->isRunning()) {
+        m_audioEngine->start(m_audioDeviceIndex, m_audioSampleRate);
+    }
+    m_captureAction->setEnabled(true);
+}
+
+void MainWindow::onReactiveBlendChanged(ReactiveBlend blend) {
+    m_audioEngine->setBlend(blend);
+    // Refresh the base frame at the moment the blend changes so the user
+    // gets a predictable visual reference (DEC-013: base is "currently
+    // selected frame, frozen").
+    m_audioEngine->setBaseFrame(m_timeline ? m_timeline->currentFrame() : VoxelFrame());
+}
+
+void MainWindow::onCaptureToggled(bool on) {
+    if (on) {
+        m_audioEngine->startCapture(m_timeline.get());
+        statusBar()->showMessage(
+            tr("Capture started — frames are being appended to the timeline."), 4000);
+    } else {
+        m_audioEngine->stopCapture();
+        statusBar()->showMessage(tr("Capture stopped."), 2000);
+    }
+}
+
+void MainWindow::onReactiveFrame(VoxelFrame f) {
+    m_viewport->setReactiveFrame(std::move(f));
+}
+
+void MainWindow::onReactiveFrameCaptured(VoxelFrame f) {
+    if (!m_timeline) return;
+    // Append the captured frame as a new timeline entry. DEC-014 soft-cap
+    // at 500 frames: stop capturing automatically when we hit it.
+    if (m_timeline->frameCount() >= 500) {
+        if (m_captureAction) m_captureAction->setChecked(false);
+        statusBar()->showMessage(
+            tr("Capture stopped — timeline reached the 500-frame soft cap."), 5000);
+        return;
+    }
+    m_timeline->addFrame();
+    m_timeline->currentFrame() = std::move(f);
+    m_timeline->notifyCurrentFrameEdited();
+}
+
+void MainWindow::onAudioError(const QString& msg) {
+    QMessageBox::warning(this, tr("Audio error"), msg);
+    // Drop back to Off mode on error so the UI reflects reality. The panel's
+    // mode combo will follow once we emit its modeChanged signal — for now
+    // we just stop the engine cleanly so the next user action starts fresh.
+    m_audioEngine->setMode(ReactiveMode::Off);
+    m_audioEngine->stop();
+    m_viewport->clearReactiveFrame();
+    m_captureAction->setChecked(false);
+    m_captureAction->setEnabled(false);
 }

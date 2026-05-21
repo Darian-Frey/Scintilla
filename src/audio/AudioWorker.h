@@ -6,6 +6,12 @@
 #include <vector>
 #include "FFTProcessor.h"
 
+// Forward declaration so we don't drag portaudio.h into this header.
+// PaStreamCallback's full signature requires the typed pointer here —
+// the `const void*` abstraction in the original scaffold did not link
+// (see BUG-009).
+struct PaStreamCallbackTimeInfo;
+
 // ── RingBuffer ────────────────────────────────────────────────────────────────
 // Lock-free SPSC ring buffer for float audio samples (DEC-011).
 // The PortAudio callback is the producer (real-time thread, no Qt, no allocs).
@@ -53,6 +59,7 @@ public:
     ~AudioWorker() override;
 
     void setGridSize(int n);
+    void setDecayPerFrame(float decay);   // thread-safe — atomic inside FFTProcessor
 
 public slots:
     void start();   // called from QThread::started
@@ -63,10 +70,12 @@ signals:
     void errorOccurred(QString message);
 
 private:
-    // PortAudio callback — static, real-time thread, no Qt (DEC-011)
+    // PortAudio callback — static, real-time thread, no Qt (DEC-011).
+    // Signature must match PortAudio's PaStreamCallback typedef exactly;
+    // statusFlags is unsigned long (the underlying type of PaStreamCallbackFlags).
     static int paCallback(const void* input, void* output,
                           unsigned long frameCount,
-                          const void* timeInfo,
+                          const PaStreamCallbackTimeInfo* timeInfo,
                           unsigned long statusFlags,
                           void* userData);
 

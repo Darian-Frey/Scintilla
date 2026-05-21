@@ -95,11 +95,26 @@ void CubeViewport::refreshFrame() {
     if (!m_initialized || !m_mask) return;
     makeCurrent();
     static const VoxelFrame kEmpty;
-    const VoxelFrame& f = m_timeline ? m_timeline->currentFrame() : kEmpty;
+    const VoxelFrame& f = m_haveReactive
+                              ? m_reactiveFrame
+                              : (m_timeline ? m_timeline->currentFrame() : kEmpty);
     m_instances.updateFrame(*m_mask, f, m_sliceX, m_sliceY, m_sliceZ);
     m_instances.upload(*this);
     doneCurrent();
     update();
+}
+
+void CubeViewport::setReactiveFrame(VoxelFrame frame) {
+    m_reactiveFrame = std::move(frame);
+    m_haveReactive  = true;
+    refreshFrame();
+}
+
+void CubeViewport::clearReactiveFrame() {
+    if (!m_haveReactive) return;
+    m_haveReactive = false;
+    m_reactiveFrame.clear();
+    refreshFrame();
 }
 
 void CubeViewport::resetCamera() {

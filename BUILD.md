@@ -26,7 +26,7 @@
 | Qt | 6.2 | Modules: Core, Gui, Widgets, OpenGLWidgets |
 | OpenGL driver | 4.3 Core profile | Hard requirement; no fallback (AV-009) |
 | PortAudio | 19.7 | System package |
-| KissFFT | bundled in-tree | MIT; vendored at `third_party/kissfft/` (not yet present — see HANDOVER) |
+| KissFFT | bundled in-tree | BSD-3-Clause; vendored at `third_party/kissfft/` |
 | Python | 3.10 + NumPy | Required for preset runtime (deferred until Phase 4) |
 
 ---
@@ -92,10 +92,17 @@ KissFFT is not packaged in distro repos; vendor it into the source tree.
 ```bash
 cd third_party
 mkdir -p kissfft && cd kissfft
-curl -L https://raw.githubusercontent.com/mborgerding/kissfft/master/kiss_fft.h -o kiss_fft.h
-curl -L https://raw.githubusercontent.com/mborgerding/kissfft/master/kiss_fft.c -o kiss_fft.c
-curl -L https://raw.githubusercontent.com/mborgerding/kissfft/master/LICENSES/BSD-3-Clause -o LICENSE
+curl -fsSL https://raw.githubusercontent.com/mborgerding/kissfft/master/kiss_fft.h       -o kiss_fft.h
+curl -fsSL https://raw.githubusercontent.com/mborgerding/kissfft/master/kiss_fft.c       -o kiss_fft.c
+curl -fsSL https://raw.githubusercontent.com/mborgerding/kissfft/master/_kiss_fft_guts.h -o _kiss_fft_guts.h
+curl -fsSL https://raw.githubusercontent.com/mborgerding/kissfft/master/kiss_fft_log.h   -o kiss_fft_log.h
+curl -fsSL https://raw.githubusercontent.com/mborgerding/kissfft/master/COPYING          -o COPYING
 ```
+
+The library ships as four source files (`kiss_fft.h`, `kiss_fft.c`, the internal
+`_kiss_fft_guts.h` that `kiss_fft.c` includes, and `kiss_fft_log.h` that
+`_kiss_fft_guts.h` includes). Licence is BSD-3-Clause (SPDX identifier in
+`COPYING`).
 
 The CMakeLists already references `third_party/kissfft/`; once these files exist, the audio pipeline will link cleanly.
 

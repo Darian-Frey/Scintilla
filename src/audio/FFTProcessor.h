@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <atomic>
 #include <cstddef>
 #include <span>
 #include <vector>
@@ -38,6 +39,13 @@ public:
     void setSampleRate(float sr);
     void setGridSize(int n);   // affects how many bands are active
 
+    // Rolling-max decay per frame for band normalisation (DEC-015).
+    // Range [0.5, 0.9999]. Lower = snappier band reactivity; higher = slower
+    // adaptation to changes in volume. Safe to call from any thread —
+    // the value is read atomically in process().
+    void setDecayPerFrame(float decay);
+    [[nodiscard]] float decayPerFrame() const { return m_decayPerFrame.load(std::memory_order_relaxed); }
+
     // Reset rolling normalisation (call on stream restart)
     void resetNormalisation();
 
@@ -57,7 +65,9 @@ private:
 
     // Rolling max per band (for normalisation, DEC-015)
     std::array<float, kNumBands> m_rollingMax = {};
-    static constexpr float kDecayPerFrame = 0.9985f; // ~3s at 60fps
+    // Atomic so the main thread can tune decay live without racing the audio
+    // thread's process() reads. Initialised to ~3s half-life at 50fps drain.
+    std::atomic<float> m_decayPerFrame{0.9985f};
 
     // Onset detection state
     float m_prevEnergy    = 0.0f;

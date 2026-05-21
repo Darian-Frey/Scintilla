@@ -19,6 +19,57 @@ and resolved before the document existed.
 
 ## Fixed
 
+### BUG-012: WaveformSlice mode lacked time history (DEC-012 "map one axis to time")
+
+**Status:** fixed (2026-05-21, this session)
+**Found:** 2026-05-21 (Phase 3 interactive verification — Shane compared the running mode against a reference heightfield image)
+**Location:** [src/audio/AudioReactiveEngine.cpp](src/audio/AudioReactiveEngine.cpp) `modeWaveformSlice`
+**Severity:** medium (mode functional but didn't fulfil the spec's intent)
+**Description.** DEC-012 specifies WaveformSlice as "map one axis (user-selectable X, Y, or Z) to **time**. Each LED on that axis represents one audio sample." The Phase 3 implementation drew the current band magnitudes onto a single Z=centre slice each frame — no time history. Visually it looked like a static line oscillating; the user expected a rolling heightfield where past samples persist as the cube fills up (topographic-map effect).
+**Reproduction.** Launch Scintilla, Audio → Reactive: Waveform with music playing. The lit voxels form a single thin line across the Z=centre slice rather than spreading into a 2D heightfield across Z.
+**Notes.** Added `std::vector<std::vector<int>> m_waveformHistory` to the engine, indexed `[z][x] → y`. Each frame: compute the current row from band magnitudes, shift `m_waveformHistory[z] = m_waveformHistory[z+1]` for z=0..n-2 (oldest data falls off the back), drop the new row at `z=n-1`. Render the whole heightfield. Storage and shift cost are trivial at the 32³ cap. The history is cleared on mode change (away from Waveform) and on mask change (grid-size variations would otherwise leave stale rows behind). One detail noted but not implemented: DEC-012 says "colour to sign" but the engine only sees absolute band magnitudes, never signed time-domain samples, so positive-vs-negative colour mapping isn't possible without restructuring `FFTProcessor` to also expose the raw waveform. Recorded as a future-consideration in the notes here; not worth a separate IMP yet.
+
+### BUG-011: Mask change didn't propagate to `AudioReactiveEngine`; reactive modes stuck at the old grid size
+
+**Status:** fixed (2026-05-21, this session)
+**Found:** 2026-05-21 (Phase 3 interactive verification — Shane set a 20³ cube and observed reactive output remained an 8×8×8 block in the corner)
+**Location:** [src/MainWindow.cpp](src/MainWindow.cpp) — `rebuildMask()` and `onOpen()`
+**Severity:** high (user-visible regression in the Phase 3 acceptance path)
+**Description.** The Phase 3 constructor wires `m_audioEngine->setMask(m_mask)` once, but neither `rebuildMask()` (Shape menu or grid-size dialog) nor `onOpen()` (loading a JSON) repeated the call. The engine kept its initial 8³ mask, so its reactive-mode helpers (`modeEqBars`, `modeBeatPulse`, `modeSpectralColour`, `modeWaveformSlice`) generated VoxelFrames sized for an 8³ grid. The viewport then displayed those frames against a 20³ shape, voxels with x/y/z ≥ 8 were absent from the frame, and only the bottom-left 8×8×8 corner showed reactive paint.
+**Reproduction.** Launch Scintilla → Audio → select a monitor source → Reactive: Spectral colour with music playing → Shape → Grid size… → 20. The lit region remains a small corner; the rest of the cube is dark.
+**Notes.** Extracted `applyMask()` helper that does all the propagation (viewport, slice control, frame info, audio engine, audio base frame) and replaced the manual fan-out in both call sites. Prevents future call-sites from re-introducing the same miss.
+
+### BUG-010: `project(... LANGUAGES CXX)` silently skipped `third_party/kissfft/kiss_fft.c`
+
+**Status:** fixed (2026-05-21, this session)
+**Found:** 2026-05-21 (Phase 3 first link attempt)
+**Location:** [CMakeLists.txt:6](CMakeLists.txt)
+**Severity:** high (linker errors blocked the whole Phase 3 build)
+**Description.** The original Phase 1 CMakeLists declared `project(Scintilla ... LANGUAGES CXX)`. With C disabled, CMake silently refused to compile `third_party/kissfft/kiss_fft.c` — `libkissfft.a` was produced but contained only the auto-generated MOC stub (`mocs_compilation.cpp.o`), not the actual FFT object code. Linking Scintilla then failed with `undefined reference to kiss_fft_alloc` / `kiss_fft`.
+**Reproduction.** With the project line at `LANGUAGES CXX`, `ar tv build/libkissfft.a` lists only the MOC compilation unit; the expected `kiss_fft.c.o` is absent. Linking errors only show at the executable link step.
+**Notes.** Two changes: (1) `LANGUAGES C CXX` so .c sources actually compile, (2) `set_target_properties(kissfft PROPERTIES AUTOMOC OFF AUTOUIC OFF AUTORCC OFF)` to skip the unnecessary MOC sweep over a vendored C-only library. The MOC stub linked harmlessly before so #2 is cleanup, not strictly required for correctness.
+
+### BUG-009: scaffolded `paCallback` declaration didn't match `PaStreamCallback*`
+
+**Status:** fixed (2026-05-21, this session)
+**Found:** 2026-05-21 (Phase 3 first build attempt — AudioWorker.cpp compile error)
+**Location:** [src/audio/AudioWorker.h:67-72](src/audio/AudioWorker.h)
+**Severity:** high (blocked Phase 3 link)
+**Description.** The scaffolded `AudioWorker.h` declared the static `paCallback` with `const void* timeInfo` and `unsigned long statusFlags` to keep `portaudio.h` out of the header. PortAudio's `PaStreamCallback*` typedef in `Pa_OpenStream`'s 7th parameter, however, requires `const PaStreamCallbackTimeInfo*` exactly — function-pointer types are matched by exact signature, not by pointer-compatibility. The `unsigned long` flags happened to match (`PaStreamCallbackFlags` is `typedef unsigned long`), but the `const void*` for `timeInfo` did not match `const PaStreamCallbackTimeInfo*`.
+**Reproduction.** With the original signature, GCC emits `invalid conversion from 'int (*)(const void*, ...)' to 'int (*)(const void*, ..., const PaStreamCallbackTimeInfo*, ...)' [-fpermissive]` at the `Pa_OpenStream(..., &AudioWorker::paCallback, ...)` call site.
+**Notes.** Fix: forward-declare `struct PaStreamCallbackTimeInfo;` at the top of `AudioWorker.h`, then use `const PaStreamCallbackTimeInfo*` in the callback declaration. The forward declaration is sufficient because the cpp includes `portaudio.h` and provides the full type when the function is defined. The abstraction goal (no portaudio.h leak into consumers) is preserved.
+
+### BUG-008: BUILD.md KissFFT vendor recipe wrong (licence, file list, paths)
+
+**Status:** fixed (2026-05-21, this session)
+**Found:** 2026-05-21 (Phase 3 prerequisites — actually vendoring KissFFT for the first time)
+**Location:** [BUILD.md:29](BUILD.md), [BUILD.md:88-100](BUILD.md)
+**Severity:** medium (broke the documented vendor flow; new contributors following the docs verbatim would have produced a non-compiling tree)
+**Description.** The Phase 1 BUILD.md, written before KissFFT was actually vendored, contained three inaccuracies that surfaced when the recipe was first run end-to-end: (a) the dependencies table called the licence "MIT" — it's BSD-3-Clause per `SPDX-License-Identifier` in `kiss_fft.h`; (b) the `curl` line fetched `LICENSES/BSD-3-Clause` which doesn't exist in the upstream tree — the licence file is `COPYING`; (c) the recipe omitted `_kiss_fft_guts.h`, an internal header that `kiss_fft.c` includes, so a tree following the docs would fail to compile with `_kiss_fft_guts.h: No such file or directory`.
+**Reproduction.** Follow BUILD.md "Vendoring KissFFT" verbatim, then attempt to build the audio target. The first `kiss_fft.c` translation unit fails on a missing include.
+**Notes.** Fixed inline during the Phase 3 vendor step (active-blocker exception per Maintenance Rule 8). Recipe now fetches `kiss_fft.h`, `kiss_fft.c`, `_kiss_fft_guts.h`, `kiss_fft_log.h`, and `COPYING`. DEC-026 already had the correct BSD-3-Clause attribution in its consequences section; only BUILD.md was stale.
+**History.** Initial 2026-05-21 fix added `_kiss_fft_guts.h` but missed a fourth required file: `_kiss_fft_guts.h` itself includes `kiss_fft_log.h`. Discovered when the first KissFFT build attempt failed with `fatal error: kiss_fft_log.h: No such file or directory`. Re-fetched in the same session and BUILD.md updated to match.
+
 ### BUG-001: `core` gitignore pattern matched `src/core/` directory
 
 **Status:** fixed (2026-05-20, pre-`b5e448b`)

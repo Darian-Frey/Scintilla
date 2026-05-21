@@ -42,7 +42,29 @@ that landed before the document existed.
 **Trade-offs.** A small fork in `buildShaders()` between Debug and Release paths. Risk: shader paths in source code drift from resource paths (mitigated by deriving both from a single constant). Worth it only if shader iteration becomes frequent — currently we have 8 shaders and won't touch most of them again until Phase 5 presets.
 **Notes.** Standard pattern in game-engine UIs. Defer until Phase 5 (presets) or until shader tweaking becomes painful again.
 
+### IMP-008: Marshal `AudioWorker::setGridSize` via Qt::QueuedConnection (cross-thread race)
+
+**Status:** suggested
+**Found:** 2026-05-21 (investigating BUG-011)
+**Location:** [src/audio/AudioReactiveEngine.cpp:39](src/audio/AudioReactiveEngine.cpp) `AudioReactiveEngine::setMask`
+**Effort:** small
+**Description.** `AudioReactiveEngine::setMask` (main thread) calls `m_worker->setGridSize(...)` directly. `AudioWorker` lives on the audio QThread; its `setGridSize` updates `m_fft.setGridSize(...)` which mutates `FFTProcessor::m_rollingMax`, `m_bandEdges`, etc. The drain loop on the worker thread reads/writes those same fields inside `process()`. A grid-size change while audio is running is therefore a data race — undefined behaviour. In practice the user has to stop audio before changing size for this not to fire, but the API doesn't enforce it.
+**Proposal.** Add `setGridSize` as a public slot on `AudioWorker` and call it via `QMetaObject::invokeMethod(m_worker, "setGridSize", Qt::QueuedConnection, Q_ARG(int, n))`. The change then lands at the start of the worker thread's next event-loop iteration, between FFT frames. Alternative: stop the engine before the change and restart after — heavier but also resolves it.
+**Trade-offs.** Adds a one-frame delay before the new grid size takes effect on FFT band count. That's invisible to the user (one audio frame is ~23 ms at 1024-sample FFTs). Doesn't increase code complexity meaningfully. The alternative (stop/restart) costs a PortAudio stream open which is ~50 ms — noticeable click.
+**Notes.** Worth doing before any feature that resizes the grid while audio is live (e.g. a "size animator" or BPM-synced grid). Until then it's a latent issue.
+
 ## Applied
+
+### IMP-007: `pkg_check_modules` instead of `find_package(PortAudio)`
+
+**Status:** applied (2026-05-21, this session)
+**Found:** 2026-05-21 (Phase 3 CMakeLists wiring — confirming the D-002 illustrative example)
+**Location:** [CMakeLists.txt:30-34](CMakeLists.txt)
+**Effort:** trivial
+**Description.** D-002 §DEC-009 shows the CMake invocation as `find_package(PortAudio REQUIRED)` + `target_link_libraries(... PortAudio::PortAudio)`. That syntax assumes either an upstream `FindPortAudio.cmake` (which CMake does not ship) or a vendor-provided CMake config (which the `portaudio19-dev` Debian package does not install). Following D-002 literally produces "Could NOT find PortAudio" at configure time on every Debian-derived system.
+**Proposal.** Use `find_package(PkgConfig REQUIRED)` + `pkg_check_modules(PORTAUDIO REQUIRED IMPORTED_TARGET portaudio-2.0)` + `target_link_libraries(... PkgConfig::PORTAUDIO)`. PortAudio installs `portaudio-2.0.pc` on every platform that ships a dev package, so this approach is more portable than a manual `FindPortAudio.cmake` shim.
+**Trade-offs.** Adds a soft dependency on `pkg-config` being installed (universal on Linux, present via Homebrew on macOS, available via MSYS / vcpkg on Windows). The D-002 example syntax was illustrative rather than binding, so this isn't a DEC reversal — but the deviation is worth recording so a reader who compares D-002 against `CMakeLists.txt` understands the gap.
+**Notes.** A future `FindPortAudio.cmake` shim under `cmake/` (so the `PortAudio::PortAudio` target name from D-002 works as-written) is possible if the deviation ever becomes confusing. For now the deviation is documented in the CMakeLists comment block.
 
 ### IMP-001: `buildSphereGeometry(SphereGeo& out, ...)` output-parameter signature
 

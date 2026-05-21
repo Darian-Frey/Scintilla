@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.22)
 project(Scintilla
     VERSION 0.1.0
     DESCRIPTION "Virtual interactive 3D LED array designer"
-    LANGUAGES CXX
+    LANGUAGES C CXX     # C needed so third_party/kissfft/kiss_fft.c compiles (BUG-010)
 )
 
 # ── C++20 ─────────────────────────────────────────────────────────────────────
@@ -27,12 +27,20 @@ find_package(Qt6 6.2 REQUIRED COMPONENTS
     OpenGLWidgets
 )
 
-# Phase 3 — uncomment when implementing the audio pipeline (DEC-009 / DEC-010).
-# find_package(PortAudio REQUIRED)
-# add_library(kissfft STATIC third_party/kissfft/kiss_fft.c)
-# target_include_directories(kissfft PUBLIC third_party/kissfft)
+# PortAudio (DEC-009) — discovered via pkg-config since there's no upstream
+# FindPortAudio.cmake module. See IMP-007 for the CMake-style deviation from
+# the D-002 illustrative example.
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(PORTAUDIO REQUIRED IMPORTED_TARGET portaudio-2.0)
 
-# ── Sources (Phase 1 + Phase 2 — core renderer + editor UI) ───────────────────
+# KissFFT (DEC-010) — vendored under third_party/kissfft/, BSD-3-Clause.
+# AUTOMOC off since the vendored C source has no Qt types and shouldn't be scanned.
+add_library(kissfft STATIC third_party/kissfft/kiss_fft.c)
+target_include_directories(kissfft PUBLIC third_party/kissfft)
+target_compile_definitions(kissfft PUBLIC kiss_fft_scalar=float)
+set_target_properties(kissfft PROPERTIES AUTOMOC OFF AUTOUIC OFF AUTORCC OFF)
+
+# ── Sources (Phase 1 + Phase 2 + Phase 3 — renderer + editor UI + audio) ─────
 set(SOURCES
     src/main.cpp
     src/MainWindow.cpp
@@ -50,6 +58,12 @@ set(SOURCES
     src/ui/SliceControlWidget.cpp
     src/ui/TimelineWidget.cpp
     src/ui/FrameInfoPanel.cpp
+    src/ui/AudioReactivePanel.cpp
+
+    src/audio/AudioWorker.cpp
+    src/audio/FFTProcessor.cpp
+    src/audio/AudioReactiveEngine.cpp
+    src/audio/AudioDevicePicker.cpp
 )
 
 set(HEADERS
@@ -68,21 +82,13 @@ set(HEADERS
     src/ui/SliceControlWidget.h
     src/ui/TimelineWidget.h
     src/ui/FrameInfoPanel.h
-)
+    src/ui/AudioReactivePanel.h
 
-# Phase 3 — uncomment when implementing the audio pipeline.
-# list(APPEND SOURCES
-#     src/audio/AudioWorker.cpp
-#     src/audio/FFTProcessor.cpp
-#     src/audio/AudioReactiveEngine.cpp
-#     src/audio/AudioDevicePicker.cpp
-# )
-# list(APPEND HEADERS
-#     src/audio/AudioWorker.h
-#     src/audio/FFTProcessor.h
-#     src/audio/AudioReactiveEngine.h
-#     src/audio/AudioDevicePicker.h
-# )
+    src/audio/AudioWorker.h
+    src/audio/FFTProcessor.h
+    src/audio/AudioReactiveEngine.h
+    src/audio/AudioDevicePicker.h
+)
 
 # Phase 4 — uncomment when implementing the preset scripting bridge.
 # list(APPEND SOURCES
@@ -118,10 +124,9 @@ target_link_libraries(Scintilla PRIVATE
     Qt6::Widgets
     Qt6::OpenGL
     Qt6::OpenGLWidgets
+    PkgConfig::PORTAUDIO
+    kissfft
 )
-
-# Phase 3 — append to link line when audio comes online.
-# target_link_libraries(Scintilla PRIVATE PortAudio::PortAudio kissfft)
 
 target_include_directories(Scintilla PRIVATE src)
 

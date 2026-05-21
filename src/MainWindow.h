@@ -12,9 +12,14 @@ class ColorPickerWidget;
 class SliceControlWidget;
 class TimelineWidget;
 class FrameInfoPanel;
+class AudioReactiveEngine;
+class AudioReactivePanel;
 class QActionGroup;
+class QAction;
 
 enum class Tool;
+enum class ReactiveMode;
+enum class ReactiveBlend;
 
 // ── MainWindow ────────────────────────────────────────────────────────────────
 //
@@ -55,6 +60,15 @@ private slots:
     void onShapeChanged(int shapeIndex);
     void onGridSizeChanged(int n);
 
+    // ── Audio reactive (Phase 3) ─────────────────────────────────────────────
+    void onPickAudioDevice();
+    void onReactiveModeChanged(ReactiveMode mode);
+    void onReactiveBlendChanged(ReactiveBlend blend);
+    void onCaptureToggled(bool on);
+    void onReactiveFrame(VoxelFrame f);
+    void onReactiveFrameCaptured(VoxelFrame f);
+    void onAudioError(const QString& msg);
+
 private:
     void buildMenus();
     void buildToolbar();
@@ -62,6 +76,7 @@ private:
     void wireSignals();
 
     void rebuildMask(int gridSize, ShapeType shape);
+    void applyMask(std::shared_ptr<ShapeMask> mask);   // propagate to all consumers (BUG-011)
     bool confirmDiscardIfDirty(const QString& reason);
     bool saveTo(const QString& path);
 
@@ -76,4 +91,11 @@ private:
 
     QActionGroup*                       m_toolGroup      = nullptr;
     QString                             m_currentPath;   // last save/open path
+
+    // ── Audio reactive plumbing ───────────────────────────────────────────────
+    std::unique_ptr<AudioReactiveEngine> m_audioEngine;
+    AudioReactivePanel* m_audioPanel    = nullptr;
+    QAction*    m_captureAction         = nullptr;
+    int         m_audioDeviceIndex      = -1;
+    float       m_audioSampleRate       = 44100.0f;
 };
