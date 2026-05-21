@@ -17,9 +17,11 @@
 #include <QFileDialog>
 #include <QInputDialog>
 #include <QKeySequence>
+#include <QLabel>
 #include <QMenuBar>
 #include <QMessageBox>
 #include <QScrollArea>
+#include <QSlider>
 #include <QStatusBar>
 #include <QToolBar>
 
@@ -52,6 +54,30 @@ MainWindow::MainWindow(QWidget* parent)
     buildMenus();
     buildToolbar();
     wireSignals();
+
+    // LED size slider lives as a permanent widget in the status bar — it's
+    // a render preference the user occasionally tweaks, doesn't justify a
+    // dock (would compound the right-side vertical-stacking problem), but
+    // wants live feedback (so a modal dialog would be wrong too).
+    //
+    // Slider 5..100 → radius 0.025..0.5 linearly. Default 19 ≈ 0.095 (DEC-028).
+    auto* sizeLabel  = new QLabel(tr("LED size:"), this);
+    auto* sizeSlider = new QSlider(Qt::Horizontal, this);
+    auto* sizeValue  = new QLabel(this);
+    sizeSlider->setRange(5, 100);
+    sizeSlider->setValue(19);                // matches the DEC-028 default radius
+    sizeSlider->setFixedWidth(140);
+    sizeValue->setMinimumWidth(40);
+    sizeValue->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+    sizeValue->setText(QStringLiteral("0.095"));
+    connect(sizeSlider, &QSlider::valueChanged, this, [this, sizeValue](int v) {
+        const float r = static_cast<float>(v) * 0.005f;   // 5→0.025, 100→0.500
+        m_viewport->setLedRadius(r);
+        sizeValue->setText(QString::number(r, 'f', 3));
+    });
+    statusBar()->addPermanentWidget(sizeLabel);
+    statusBar()->addPermanentWidget(sizeSlider);
+    statusBar()->addPermanentWidget(sizeValue);
 
     statusBar()->showMessage(tr("Ready — paint with left-click, orbit with drag, zoom with wheel."));
 }
@@ -377,13 +403,23 @@ bool MainWindow::confirmDiscardIfDirty(const QString& reason) {
 void MainWindow::onPickAudioDevice() {
     AudioDevicePicker dlg(this);
     if (dlg.exec() != QDialog::Accepted) return;
-    m_audioDeviceIndex = dlg.selectedDeviceIndex();
-    m_audioSampleRate  = dlg.selectedSampleRate();
-    statusBar()->showMessage(
-        tr("Audio device set: index %1 @ %2 Hz")
-            .arg(m_audioDeviceIndex)
-            .arg(static_cast<double>(m_audioSampleRate)),
-        4000);
+    m_audioDeviceIndex   = dlg.selectedDeviceIndex();
+    m_audioSampleRate    = dlg.selectedSampleRate();
+    m_audioMonitorSource = dlg.selectedMonitorSource();
+
+    if (!m_audioMonitorSource.isEmpty()) {
+        statusBar()->showMessage(
+            tr("System audio routing: %1 (system default input changed via pactl) @ %2 Hz")
+                .arg(m_audioMonitorSource)
+                .arg(static_cast<double>(m_audioSampleRate)),
+            6000);
+    } else {
+        statusBar()->showMessage(
+            tr("Audio device set: index %1 @ %2 Hz")
+                .arg(m_audioDeviceIndex)
+                .arg(static_cast<double>(m_audioSampleRate)),
+            4000);
+    }
 }
 
 void MainWindow::onReactiveModeChanged(ReactiveMode mode) {
@@ -396,7 +432,7 @@ void MainWindow::onReactiveModeChanged(ReactiveMode mode) {
         return;
     }
 
-    if (m_audioDeviceIndex < 0) {
+    if (m_audioDeviceIndex < 0 && m_audioMonitorSource.isEmpty()) {
         QMessageBox::information(
             this, tr("Pick an audio device first"),
             tr("Use Audio → Select input device… to choose a monitor / loopback source, "
@@ -407,7 +443,7 @@ void MainWindow::onReactiveModeChanged(ReactiveMode mode) {
     m_audioEngine->setMode(mode);
     m_audioEngine->setBaseFrame(m_timeline ? m_timeline->currentFrame() : VoxelFrame());
     if (!m_audioEngine->isRunning()) {
-        m_audioEngine->start(m_audioDeviceIndex, m_audioSampleRate);
+        m_audioEngine->start(m_audioDeviceIndex, m_audioSampleRate, m_audioMonitorSource);
     }
     m_captureAction->setEnabled(true);
 }

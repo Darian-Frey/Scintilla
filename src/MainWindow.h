@@ -98,4 +98,5 @@ private:
     QAction*    m_captureAction         = nullptr;
     int         m_audioDeviceIndex      = -1;
     float       m_audioSampleRate       = 44100.0f;
+    QString     m_audioMonitorSource;            // empty unless user picked one
 };

@@ -3,6 +3,7 @@
 #include <QDebug>
 #include <QMouseEvent>
 #include <QWheelEvent>
+#include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <limits>
@@ -85,6 +86,7 @@ void CubeViewport::setSlice(int x, int y, int z) {
 void CubeViewport::setShowGhost(bool show)     { m_showGhost     = show; update(); }
 void CubeViewport::setShowBounds(bool show)    { m_showBounds    = show; update(); }
 void CubeViewport::setShowAxisGizmo(bool show) { m_showAxisGizmo = show; update(); }
+void CubeViewport::setLedRadius(float r)       { m_ledRadius     = std::clamp(r, 0.005f, 1.0f); update(); }
 
 void CubeViewport::setAutoRotate(bool on) {
     if (on) m_rotTimer.start(kRotTimerMs);
@@ -158,17 +160,27 @@ void CubeViewport::paintGL() {
     const QMatrix4x4 vp     = m_camera.projMatrix(m_aspectRatio) * m_camera.viewMatrix();
     const QVector3D  camPos = m_camera.position();
 
-    // ─── On-LEDs (opaque) ────────────────────────────────────────────────────
-    glDepthMask(GL_TRUE);
+    // ─── On-LEDs (additive glow) ─────────────────────────────────────────────
+    // Additive blending so overlapping lit LEDs sum to brighter colour, the
+    // way real light sources accumulate. No depth writes — lit LEDs don't
+    // hard-occlude ghosts behind them, which is the "glowing through" look.
+    glDepthMask(GL_FALSE);
+    glBlendFunc(GL_ONE, GL_ONE);
+
     m_ledProg->bind();
-    m_ledProg->setUniformValue("uVP",       vp);
-    m_ledProg->setUniformValue("uLightDir", QVector3D(2.0f, 3.0f, 1.5f).normalized());
-    m_ledProg->setUniformValue("uCamPos",   camPos);
+    m_ledProg->setUniformValue("uVP",        vp);
+    m_ledProg->setUniformValue("uLightDir",  QVector3D(2.0f, 3.0f, 1.5f).normalized());
+    m_ledProg->setUniformValue("uCamPos",    camPos);
+    m_ledProg->setUniformValue("uLedRadius", m_ledRadius);
     glBindVertexArray(m_onSphere.vao);
     glDrawElementsInstanced(GL_TRIANGLES, m_onSphere.indexCount, GL_UNSIGNED_INT, nullptr,
                             m_instances.count());
     glBindVertexArray(0);
     m_ledProg->release();
+
+    // Restore standard alpha blend for ghosts and the bounding box.
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glDepthMask(GL_TRUE);
 
     // ─── Ghost-LEDs (transparent) ────────────────────────────────────────────
     if (m_showGhost) {

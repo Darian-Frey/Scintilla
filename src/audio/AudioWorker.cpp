@@ -7,6 +7,8 @@
 #include <algorithm>
 #include <vector>
 
+#include "AudioRouting.h"
+
 // ── RingBuffer ───────────────────────────────────────────────────────────────
 //
 // SPSC ring buffer (DEC-011 / AV-008). The producer (PortAudio callback)
@@ -65,10 +67,12 @@ size_t RingBuffer::available() const {
 
 // ── AudioWorker ──────────────────────────────────────────────────────────────
 
-AudioWorker::AudioWorker(int deviceIndex, float sampleRate, QObject* parent)
+AudioWorker::AudioWorker(int deviceIndex, float sampleRate,
+                         const QString& monitorSource, QObject* parent)
     : QObject(parent)
     , m_deviceIndex(deviceIndex)
     , m_sampleRate(sampleRate)
+    , m_monitorSource(monitorSource)
     , m_ring(kRingCapacity)
     , m_fft(sampleRate) {
 }
@@ -112,9 +116,30 @@ int AudioWorker::paCallback(const void* input, void* /*output*/,
 void AudioWorker::start() {
     if (m_paStream) return;
 
+    // Redirect the PulseAudio / PipeWire default source to the chosen monitor
+    // *before* PortAudio opens — the open call captures whatever the default
+    // is at that moment, and the ALSA host API can't see monitor sources by
+    // name. AudioRouting captures the prior default on first use so the
+    // crash handler / clean-exit hook can restore it.
+    if (!m_monitorSource.isEmpty()) {
+        if (!AudioRouting::setDefaultSource(m_monitorSource)) {
+            emit errorOccurred(tr("Failed to set system default source to %1")
+                                   .arg(m_monitorSource));
+            return;
+        }
+    }
+
     if (Pa_Initialize() != paNoError) {
         emit errorOccurred(tr("Pa_Initialize failed"));
         return;
+    }
+
+    // If a monitor was just set as default, ignore the caller's deviceIndex
+    // and open PortAudio's notion of the default input — that's the one that
+    // now points at the monitor.
+    if (!m_monitorSource.isEmpty()) {
+        const PaDeviceIndex def = Pa_GetDefaultInputDevice();
+        if (def != paNoDevice) m_deviceIndex = def;
     }
 
     PaStreamParameters params{};

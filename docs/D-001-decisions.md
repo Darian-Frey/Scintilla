@@ -30,7 +30,7 @@ or shape changes, not per-frame.
 ## DEC-002 · Spherical LED geometry
 
 **Date**: 2026-05-19
-**Status**: Closed
+**Status**: Partially superseded by DEC-028 (lit-LED radius re-tuned to 0.095 — geometry type, segment counts, and ghost radius still apply)
 
 **Decision**: LEDs are rendered as spheres (SphereGeometry r=0.38, 9 lon × 7 lat segments).
 Ghost LEDs use r=0.17.

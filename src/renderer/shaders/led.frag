@@ -10,25 +10,51 @@ uniform vec3 uCamPos;
 
 out vec4 fragColor;
 
+// Real-LED look without screen-space bloom:
+//
+//   - Fresnel-driven brightness so the visible "lit area" is a small core
+//     inside the geometric sphere; the rim fades to a soft glow rather than
+//     a hard silhouette. This makes the lit LED appear visually the same
+//     size as the ghost dot underneath it (DEC-002 sphere radius preserved).
+//
+//   - Mix toward white at the very front-facing centre, mimicking how a
+//     real LED die looks through a diffuser dome — the colour washes out
+//     where the light is hottest.
+//
+//   - Strong emissive contribution so lit LEDs self-illuminate; they don't
+//     depend on the directional light to be visible.
+//
+// Paired with additive blending in CubeViewport::paintGL so overlapping
+// LEDs accumulate brightness (physically what happens when multiple light
+// sources are seen together).
+
 void main() {
-    // Discard zero-scale instances (scale-to-zero hide strategy, DEC-001)
     if (vScale < 0.001) discard;
 
     vec3 N = normalize(vNormal);
-    vec3 L = normalize(uLightDir);
     vec3 V = normalize(uCamPos - vWorldPos);
-    vec3 H = normalize(L + V);
 
-    // Lambertian diffuse + ambient
-    float diff = max(dot(N, L), 0.0) * 0.70 + 0.30;
+    float NdotV = max(dot(N, V), 0.0);
 
-    // Specular highlight — simulates the glass dome of an LED
-    float spec = pow(max(dot(N, H), 0.0), 48.0) * 0.55;
+    // Very tight hot spot at the front-facing centre (white-ish die)
+    float core = pow(NdotV, 8.0);
 
-    // Subtle emissive boost so lit LEDs glow even in shadow
-    vec3 emissive = vColor * 0.12;
+    // Wider but still front-biased dome glow
+    float dome = pow(NdotV, 2.0);
 
-    vec3 lit = vColor * diff + vec3(spec) + emissive;
+    // Centre washes toward white; edges keep the LED's colour
+    vec3 hot = mix(vColor, vec3(1.8), core * 0.9);
 
-    fragColor = vec4(lit, 1.0);
+    // Intensity envelope: bright at centre, soft at the rim
+    float intensity = dome * 0.85 + core * 1.6;
+
+    // Emissive base so the LED looks self-lit even when behind shadows
+    vec3 emissive = vColor * 0.45;
+
+    vec3 finalColor = emissive + hot * intensity;
+
+    // alpha = 1.0 because we render with additive blending (GL_ONE/GL_ONE);
+    // the colour itself encodes the falloff. Edges have low intensity so
+    // they contribute almost nothing additively.
+    fragColor = vec4(finalColor, 1.0);
 }

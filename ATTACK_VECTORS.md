@@ -31,13 +31,13 @@
 **Related decisions.** DEC-001.
 **History.** Anticipated regression; documented before first implementation.
 
-### AV-003 LED radius drift from 0.38
+### AV-003 LED radius drift from tuned values
 
 **Severity:** Major
-**Description.** The on-LED sphere radius (0.38), ghost-LED radius (0.17), and ghost opacity (0.22) were tuned visually and define the "classic LED dome" look. Drift produces a visually wrong product even when no test fails.
-**Detection.** Manual: visual comparison against `prototype/index.html` on any shader or geometry change. The constants are duplicated in `src/renderer/shaders/led.vert` and ghost-LED equivalents; both must move together.
-**Related decisions.** DEC-002.
-**History.** Tuned in the prototype; constants are CLAUDE.md "Notes for Claude Code" calling these out as binding.
+**Description.** The lit-LED sphere radius (**0.095** per DEC-028, originally 0.38 per DEC-002), ghost-LED radius (0.17, DEC-002), and ghost opacity (0.22, DEC-002) were tuned visually and define the LED dome look. Drift produces a visually wrong product even when no test fails.
+**Detection.** Manual: visual comparison against the canonical look on any shader or geometry change. The constants live in `src/renderer/shaders/led.vert` (`kRadius`) and `src/renderer/shaders/ghost.vert` (`kGhostRadius`).
+**Related decisions.** DEC-002 (original values + geometry choice, partially superseded), DEC-028 (re-tune to 0.095 for the Phase 3 Fresnel-glow renderer).
+**History.** Tuned in the prototype at 0.38 / 0.17 / 0.22; lit radius re-tuned to 0.095 in DEC-028 (2026-05-21) after the Fresnel-glow shader landed and the original 0.38 felt visually too large alongside the new soft halo. The `prototype/index.html` no longer matches the production look on this specific value.
 
 ### AV-009 OpenGL < 4.3 fallback
 

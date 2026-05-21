@@ -32,8 +32,12 @@ class AudioDevicePicker : public QDialog {
 public:
     explicit AudioDevicePicker(QWidget* parent = nullptr);
 
-    [[nodiscard]] int   selectedDeviceIndex() const { return m_deviceIndex; }
-    [[nodiscard]] float selectedSampleRate()  const { return m_sampleRate; }
+    [[nodiscard]] int     selectedDeviceIndex()  const { return m_deviceIndex; }
+    [[nodiscard]] float   selectedSampleRate()   const { return m_sampleRate; }
+    // Non-empty iff the user picked a PulseAudio / PipeWire monitor source.
+    // When set, the engine should run pactl set-default-source on this name
+    // before opening PortAudio's "default" device.
+    [[nodiscard]] QString selectedMonitorSource() const { return m_monitorSource; }
 
 private slots:
     void onSelectionChanged();
@@ -51,7 +55,9 @@ private:
     QPushButton*  m_okButton       = nullptr;
     QPushButton*  m_refreshButton  = nullptr;
 
-    QList<AudioReactiveEngine::DeviceInfo> m_devices;
-    int   m_deviceIndex = -1;
-    float m_sampleRate  = 44100.0f;
+    QList<AudioReactiveEngine::DeviceInfo>    m_devices;
+    QList<AudioReactiveEngine::MonitorSource> m_monitors;
+    int     m_deviceIndex   = -1;
+    float   m_sampleRate    = 44100.0f;
+    QString m_monitorSource;     // set when the user picks a monitor entry
 };

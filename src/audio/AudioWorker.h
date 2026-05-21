@@ -55,6 +55,7 @@ class AudioWorker : public QObject {
 
 public:
     explicit AudioWorker(int deviceIndex, float sampleRate = 44100.0f,
+                         const QString& monitorSource = QString(),
                          QObject* parent = nullptr);
     ~AudioWorker() override;
 
@@ -81,6 +82,7 @@ private:
 
     int         m_deviceIndex;
     float       m_sampleRate;
+    QString     m_monitorSource;        // PulseAudio source name, "" = none
     void*       m_paStream = nullptr;   // PaStream* — opaque to avoid pa header here
     RingBuffer  m_ring;
     FFTProcessor m_fft;

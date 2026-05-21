@@ -27,6 +27,7 @@ The early decisions (DEC-001 … DEC-023) live in three thematic files under [`d
 | DEC-025 | `HANDOVER.md` as project-specific extension | Accepted | this file |
 | DEC-026 | MIT licence | Accepted | this file |
 | DEC-027 | Adopt `BUGS.md` and `IMPROVEMENTS.md` per updated standard | Accepted | this file |
+| DEC-028 | Re-tune lit-LED radius to 0.095 for the Fresnel-glow renderer | Accepted | this file |
 
 ---
 
@@ -134,3 +135,32 @@ The early decisions (DEC-001 … DEC-023) live in three thematic files under [`d
 - The reserved-names list in DEC-025 (extensions clause) implicitly extends to include `BUGS` and `IMPROVEMENTS` — they're standard Tier 2 names now, not extensions.
 
 **Reversal conditions.** Revisit if (a) the catalogues drift out of date faster than they're maintained (the standard's own discipline failure mode), or (b) Scintilla transitions to using an external bug tracker (GitHub Issues, Linear) as authoritative, at which point BUGS.md becomes redundant per the cost-note friction test.
+
+---
+
+### DEC-028 Re-tune lit-LED radius to 0.095 for the Fresnel-glow renderer
+
+**Decided:** 2026-05-21
+**Recorded:** 2026-05-21
+**Status:** Accepted
+**Authors:** Shane Hartley
+**Related:** DEC-002 (original 0.38 value, now partially superseded), `src/renderer/shaders/led.vert`, [ATTACK_VECTORS.md](ATTACK_VECTORS.md) AV-003, [CLAUDE.md](CLAUDE.md) §Notes for Claude Code
+
+**Context.** DEC-002 fixed the lit-LED sphere radius at 0.38, tuned visually against the Phase 1 Lambert+specular shader. Phase 3 introduced a Fresnel-driven additive-glow shader (`led.frag`, see commit `11a9685` discussion) which gives a much more LED-like appearance — bright die at the centre, soft halo. Under that shader the 0.38 sphere felt visually too large compared to the ghost dots (0.17), even with the Fresnel falloff making most of the geometric area dim. Shane requested a re-tune to ~25 % of the original size.
+
+**Options.**
+
+- **A. Leave the sphere at 0.38 and tune the Fresnel exponents to compress the visible bright area further.** Preserves DEC-002 literally. Rejected: the additive glow halo derives from the geometric extent, so the *visible* glow is bounded by the sphere; aggressive Fresnel compression also kills the halo.
+- **B. Reduce the sphere radius to 25 % of the original (0.095).** Chosen. Smaller geometric extent means a smaller, sharper bright core, surrounded by the ghost (0.17) as a "dome" — directly evoking real LED hardware where the die sits inside a translucent plastic body. The additive halo still extends naturally from the smaller sphere; in practice the halo is small but visible, and overlapping LEDs still accumulate brightness.
+- **C. Reduce both lit and ghost radii proportionally.** Rejected: would compound the visual change. The ghost size already feels right; only the lit size was the complaint.
+
+**Decision.** Option B. `kRadius` in `src/renderer/shaders/led.vert` changes from 0.38 to 0.095. Ghost radius (`kGhostRadius` in `ghost.vert`) stays at 0.17 unchanged. Segment counts (9×7 on, 6×5 ghost) and sphere geometry choice from DEC-002 also stay unchanged — DEC-028 supersedes only the radius value.
+
+**Consequences.**
+
+- Lit LEDs are now visually *smaller* than the ghost dots underneath them — the "die inside a dome" effect. Turning on an LED makes it appear as a tiny bright spot inside the existing larger faint ghost, rather than replacing it with a bigger sphere.
+- The additive glow halo is smaller in absolute terms. Overlapping lit LEDs still merge but cover less screen area.
+- AV-003 ("LED radius drift from 0.38") needs updating to reflect the new 0.095 bound, otherwise the next reviewer will treat 0.38 as the correct value and the new value as drift.
+- CLAUDE.md's "Notes for Claude Code" line ("LED radius (0.38) … treat as constants") needs updating to the new value plus a DEC-028 reference.
+
+**Reversal conditions.** Revisit if (a) the new size feels too small at large grid sizes (the geometric extent doesn't scale with grid), (b) a future bloom / post-processing pipeline lands and the per-fragment glow technique stops being load-bearing, or (c) interactive testing across multiple hardware setups shows the smaller radius reads as "broken pixels" rather than "LED dies" on lower-DPI displays.

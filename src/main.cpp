@@ -1,8 +1,19 @@
 #include <QApplication>
 #include <QSurfaceFormat>
+
 #include "MainWindow.h"
+#include "audio/AudioRouting.h"
+#include "util/CrashHandler.h"
 
 int main(int argc, char* argv[]) {
+    // Install the crash handler very early — before QApplication, before
+    // anything that might segfault. Hooks registered here will run on any
+    // fatal signal (SIGSEGV / SIGABRT / SIGFPE / SIGILL / SIGBUS), then the
+    // signal is re-raised with the default handler so a coredump can still
+    // be produced.
+    CrashHandler::install();
+    CrashHandler::addCrashHook(&AudioRouting::signalSafeRestore);
+
     // Set OpenGL 4.3 Core profile before QApplication is constructed.
     // Must happen first — see Qt docs on QSurfaceFormat::setDefaultFormat.
     QSurfaceFormat fmt;
@@ -16,6 +27,11 @@ int main(int argc, char* argv[]) {
     app.setApplicationName("Scintilla");
     app.setApplicationVersion("0.1.0");
     app.setOrganizationName("Darian-Frey");
+
+    // On clean exit, restore the system default audio source via QProcess
+    // (the crash-path uses the signal-safe variant registered above).
+    QObject::connect(&app, &QApplication::aboutToQuit,
+                     []() { AudioRouting::restoreSaved(); });
 
     MainWindow window;
     window.show();

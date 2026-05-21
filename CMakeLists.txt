@@ -64,6 +64,9 @@ set(SOURCES
     src/audio/FFTProcessor.cpp
     src/audio/AudioReactiveEngine.cpp
     src/audio/AudioDevicePicker.cpp
+    src/audio/AudioRouting.cpp
+
+    src/util/CrashHandler.cpp
 )
 
 set(HEADERS
@@ -88,6 +91,9 @@ set(HEADERS
     src/audio/FFTProcessor.h
     src/audio/AudioReactiveEngine.h
     src/audio/AudioDevicePicker.h
+    src/audio/AudioRouting.h
+
+    src/util/CrashHandler.h
 )
 
 # Phase 4 — uncomment when implementing the preset scripting bridge.
@@ -133,6 +139,12 @@ target_include_directories(Scintilla PRIVATE src)
 # ── Compiler warnings ─────────────────────────────────────────────────────────
 target_compile_options(Scintilla PRIVATE
     $<$<CXX_COMPILER_ID:GNU,Clang>: -Wall -Wextra -Wpedantic>
+)
+
+# Export executable symbols so the CrashHandler's backtrace_symbols_fd can
+# resolve them in stack traces (otherwise only library symbols are visible).
+target_link_options(Scintilla PRIVATE
+    $<$<CXX_COMPILER_ID:GNU,Clang>: -rdynamic>
 )
 
 # ── Install ───────────────────────────────────────────────────────────────────

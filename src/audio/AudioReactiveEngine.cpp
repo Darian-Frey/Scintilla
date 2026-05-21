@@ -2,6 +2,7 @@
 
 #include <portaudio.h>
 #include <QMetaType>
+#include <QProcess>
 #include <algorithm>
 #include <cmath>
 
@@ -30,10 +31,12 @@ AudioReactiveEngine::~AudioReactiveEngine() {
 void AudioReactiveEngine::setMask(std::shared_ptr<const ShapeMask> mask) {
     m_mask = std::move(mask);
     if (m_worker && m_mask) m_worker->setGridSize(m_mask->gridSize());
-    // Grid size may have changed; force the waveform history to rebuild on
-    // the next frame rather than letting stale (z,x) entries linger.
+    // Grid size may have changed; clear all mode-local rolling state so
+    // (z,x)-indexed buffers don't linger at the old size.
     m_waveformHistory.clear();
     m_waveformFrameCounter = 0;
+    m_tunnelHistory.clear();
+    m_tunnelHead = 0;
 }
 
 void AudioReactiveEngine::setMode(ReactiveMode mode) {
@@ -42,6 +45,10 @@ void AudioReactiveEngine::setMode(ReactiveMode mode) {
     if (mode != ReactiveMode::WaveformSlice) {
         m_waveformHistory.clear();
         m_waveformFrameCounter = 0;
+    }
+    if (mode != ReactiveMode::Tunnel) {
+        m_tunnelHistory.clear();
+        m_tunnelHead = 0;
     }
 }
 
@@ -119,6 +126,61 @@ QList<AudioReactiveEngine::DeviceInfo> AudioReactiveEngine::enumerateDevices() {
     return out;
 }
 
+// ── PulseAudio / PipeWire monitor source enumeration via pactl ──────────────
+
+bool AudioReactiveEngine::isMonitorRoutingSupported() {
+    QProcess p;
+    p.start(QStringLiteral("pactl"), QStringList{QStringLiteral("--version")});
+    if (!p.waitForFinished(500)) {
+        p.kill();
+        p.waitForFinished(200);
+        return false;
+    }
+    return p.exitCode() == 0;
+}
+
+QList<AudioReactiveEngine::MonitorSource> AudioReactiveEngine::enumerateMonitors() {
+    QList<MonitorSource> out;
+    QProcess p;
+    p.start(QStringLiteral("pactl"), QStringList{QStringLiteral("list"), QStringLiteral("sources")});
+    if (!p.waitForFinished(2000)) {
+        p.kill();
+        p.waitForFinished(500);
+        return out;
+    }
+    if (p.exitCode() != 0) return out;
+
+    // pactl list sources output is a series of "Source #N\n    Name: ...\n
+    // Description: ...\n    ..." blocks separated by blank lines.
+    const QString blob = QString::fromUtf8(p.readAllStandardOutput());
+    const QStringList lines = blob.split('\n');
+
+    QString currentName;
+    QString currentDesc;
+    auto flush = [&]() {
+        if (currentName.endsWith(QStringLiteral(".monitor"))) {
+            out.push_back({currentName,
+                           currentDesc.isEmpty() ? currentName : currentDesc});
+        }
+        currentName.clear();
+        currentDesc.clear();
+    };
+    for (const QString& raw : lines) {
+        const QString line = raw.trimmed();
+        if (line.startsWith(QStringLiteral("Source #"))) {
+            flush();
+            continue;
+        }
+        if (line.startsWith(QStringLiteral("Name: "))) {
+            currentName = line.mid(6);
+        } else if (line.startsWith(QStringLiteral("Description: "))) {
+            currentDesc = line.mid(13);
+        }
+    }
+    flush();
+    return out;
+}
+
 QList<int> AudioReactiveEngine::supportedSampleRates(int deviceIndex) {
     static constexpr int kCommonRates[] = {
         22050, 32000, 44100, 48000, 88200, 96000, 192000,
@@ -148,11 +210,12 @@ QList<int> AudioReactiveEngine::supportedSampleRates(int deviceIndex) {
 
 // ── Lifecycle ────────────────────────────────────────────────────────────────
 
-void AudioReactiveEngine::start(int deviceIndex, float sampleRate) {
+void AudioReactiveEngine::start(int deviceIndex, float sampleRate,
+                                const QString& monitorSource) {
     if (m_running) return;
 
     m_thread = new QThread(this);
-    m_worker = new AudioWorker(deviceIndex, sampleRate);
+    m_worker = new AudioWorker(deviceIndex, sampleRate, monitorSource);
     if (m_mask) m_worker->setGridSize(m_mask->gridSize());
     m_worker->moveToThread(m_thread);
 
@@ -208,6 +271,9 @@ void AudioReactiveEngine::onBands(BandData data) {
         case ReactiveMode::BeatPulse:      frame = modeBeatPulse(data);      break;
         case ReactiveMode::WaveformSlice:  frame = modeWaveformSlice(data);  break;
         case ReactiveMode::SpectralColour: frame = modeSpectralColour(data); break;
+        case ReactiveMode::RadialEq:       frame = modeRadialEq(data);       break;
+        case ReactiveMode::Tunnel:         frame = modeTunnel(data);         break;
+        case ReactiveMode::EnergyFloor:    frame = modeEnergyFloor(data);    break;
         case ReactiveMode::Off:            return;
     }
 
@@ -357,6 +423,133 @@ VoxelFrame AudioReactiveEngine::modeSpectralColour(const BandData& d) const {
 
     for (const auto& p : m_mask->positions()) {
         out.set(p.x, p.y, p.z, c[0], c[1], c[2]);
+    }
+    return out;
+}
+
+// ── RadialEq ─────────────────────────────────────────────────────────────────
+//
+// Bands as concentric shells from the cube centre. Distance-to-centre maps to
+// band index — innermost shell = bass, outermost = treble. Light each voxel
+// whose shell's band magnitude exceeds a threshold, scaled by the magnitude.
+
+VoxelFrame AudioReactiveEngine::modeRadialEq(const BandData& d) const {
+    VoxelFrame out;
+    if (!m_mask) return out;
+    const int n = m_mask->gridSize();
+    const float centre  = (static_cast<float>(n) - 1.0f) * 0.5f;
+    // Max possible distance is the cube's body diagonal half.
+    const float maxDist = std::sqrt(3.0f) * centre + 0.5f;
+
+    for (const auto& p : m_mask->positions()) {
+        const float dx = static_cast<float>(p.x) - centre;
+        const float dy = static_cast<float>(p.y) - centre;
+        const float dz = static_cast<float>(p.z) - centre;
+        const float dist = std::sqrt(dx * dx + dy * dy + dz * dz);
+
+        const float t = std::clamp(dist / std::max(maxDist, 1e-6f), 0.0f, 0.9999f);
+        const int   bandIdx = std::clamp(static_cast<int>(t * static_cast<float>(n)), 0, n - 1);
+        const float mag     = d.bands[static_cast<size_t>(bandIdx)];
+
+        if (mag < 0.05f) continue;
+        const auto col = bandColor(bandIdx, n, mag, m_hueOffset);
+        out.set(p.x, p.y, p.z, col[0], col[1], col[2]);
+    }
+    return out;
+}
+
+// ── Tunnel ───────────────────────────────────────────────────────────────────
+//
+// MilkDrop-style "flying through colour" effect. Each Z slice carries one past
+// frame's full band snapshot rendered as an EQ wall (x = band index, y = bar
+// height). New frame at Z=n-1 (front), older snapshots march back toward Z=0
+// with brightness decaying with age.
+//
+// Memory: a circular buffer of N std::array<float,32> snapshots — trivial.
+
+VoxelFrame AudioReactiveEngine::modeTunnel(const BandData& d) {
+    VoxelFrame out;
+    if (!m_mask) return out;
+    const int n = m_mask->gridSize();
+
+    // (Re)allocate the history if grid size changed since the last frame.
+    if (static_cast<int>(m_tunnelHistory.size()) != n) {
+        m_tunnelHistory.assign(static_cast<size_t>(n), std::array<float, 32>{});
+        m_tunnelHead = 0;
+    }
+
+    // Write the current snapshot at the head; advance head modulo n.
+    m_tunnelHistory[static_cast<size_t>(m_tunnelHead)] = d.bands;
+    m_tunnelHead = (m_tunnelHead + 1) % n;
+
+    // Render each Z slice from the corresponding history entry. Z=n-1 is the
+    // most-recently-written slot (head - 1); Z=0 is the oldest (head). Age
+    // fades brightness so the back of the tunnel dims naturally.
+    for (int z = 0; z < n; ++z) {
+        const int ageFromNewest = (n - 1) - z;     // 0 at front, n-1 at back
+        const int idx = ((m_tunnelHead - 1 - ageFromNewest) % n + n) % n;
+        const auto& bands = m_tunnelHistory[static_cast<size_t>(idx)];
+
+        const float ageFade = 1.0f - static_cast<float>(ageFromNewest)
+                                       / static_cast<float>(std::max(1, n - 1));
+
+        for (int x = 0; x < n; ++x) {
+            const int   bandIdx = std::min(n - 1, x);
+            const float mag     = bands[static_cast<size_t>(bandIdx)];
+            if (mag < 0.05f) continue;
+
+            const int  height = static_cast<int>(std::round(mag * static_cast<float>(n)));
+            const auto col    = bandColor(bandIdx, n, mag * ageFade, m_hueOffset);
+            for (int y = 0; y < std::min(height, n); ++y) {
+                if (m_mask->contains(x, y, z)) {
+                    out.set(x, y, z, col[0], col[1], col[2]);
+                }
+            }
+        }
+    }
+    return out;
+}
+
+// ── EnergyFloor ──────────────────────────────────────────────────────────────
+//
+// A "wall of light" rising from Y=0 uniformly across Z, with the X axis
+// coloured by frequency band. Wall height is driven by overall RMS so it
+// reads as a single visual response to total volume, while the colour pattern
+// still varies with the spectrum. Visual contrast against EqBars: that mode
+// has per-column heights (jagged ceiling); this one has a flat ceiling that
+// rises and falls with RMS.
+
+VoxelFrame AudioReactiveEngine::modeEnergyFloor(const BandData& d) const {
+    VoxelFrame out;
+    if (!m_mask) return out;
+    const int n = m_mask->gridSize();
+
+    // RMS-driven ceiling. RMS is small in practice; gain it to fill the cube.
+    const int ceiling = std::clamp(
+        static_cast<int>(std::round(d.rms * 8.0f * static_cast<float>(n))),
+        1, n);
+
+    for (int x = 0; x < n; ++x) {
+        const int   bandIdx = std::min(n - 1, x);
+        const float mag     = d.bands[static_cast<size_t>(bandIdx)];
+        if (mag < 0.05f) continue;
+
+        const auto col = bandColor(bandIdx, n, mag, m_hueOffset);
+        for (int y = 0; y < ceiling; ++y) {
+            // Brightness falls off with height inside the wall — bottom is
+            // intense, top of the wall is faded to its tip.
+            const float fade = 1.0f - static_cast<float>(y)
+                                       / static_cast<float>(std::max(1, ceiling));
+            const uint8_t r = static_cast<uint8_t>(std::round(col[0] * fade));
+            const uint8_t g = static_cast<uint8_t>(std::round(col[1] * fade));
+            const uint8_t b = static_cast<uint8_t>(std::round(col[2] * fade));
+
+            for (int z = 0; z < n; ++z) {
+                if (m_mask->contains(x, y, z)) {
+                    out.set(x, y, z, r, g, b);
+                }
+            }
+        }
     }
     return out;
 }

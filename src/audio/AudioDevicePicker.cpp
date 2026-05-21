@@ -21,11 +21,11 @@ void AudioDevicePicker::buildLayout() {
     auto* root = new QVBoxLayout(this);
 
     root->addWidget(new QLabel(
-        tr("Choose a system audio capture device. Entries tagged "
-           "[recommended] route through a sound server (PipeWire / PulseAudio "
-           "/ JACK) and are the most reliable picks for music capture on "
-           "Linux. Hardware ALSA devices below them only capture if they "
-           "have a real microphone or line-in attached."),
+        tr("To capture audio playing on this computer, choose one of the "
+           "[system audio] monitor sources at the top. Selecting one tells "
+           "Scintilla to redirect the system default input to that monitor "
+           "until you change it (or reboot). To capture from a real "
+           "microphone instead, pick a regular device below."),
         this));
 
     m_list = new QListWidget(this);
@@ -68,7 +68,37 @@ void AudioDevicePicker::buildLayout() {
 
 void AudioDevicePicker::populate() {
     m_list->clear();
-    m_devices = AudioReactiveEngine::enumerateDevices();
+    m_devices  = AudioReactiveEngine::enumerateDevices();
+    m_monitors = AudioReactiveEngine::enumerateMonitors();
+
+    // ─── Monitor sources first (system-audio capture) ───────────────────────
+    if (!m_monitors.isEmpty()) {
+        auto* header = new QListWidgetItem(
+            tr("── System audio (PulseAudio / PipeWire monitor sources) ──"),
+            m_list);
+        header->setFlags(Qt::NoItemFlags);
+        QFont hf = header->font();
+        hf.setItalic(true);
+        header->setFont(hf);
+
+        for (const auto& m : m_monitors) {
+            auto* it = new QListWidgetItem(
+                tr("[system audio] %1").arg(m.description), m_list);
+            // UserRole = -1 sentinel meaning "this is a monitor pick"; the
+            // monitor name lives in UserRole+1.
+            it->setData(Qt::UserRole,     -1);
+            it->setData(Qt::UserRole + 1, m.name);
+            QFont f = it->font();
+            f.setBold(true);
+            it->setFont(f);
+        }
+
+        // Divider before PortAudio devices
+        auto* divider = new QListWidgetItem(
+            tr("── PortAudio capture devices ──"), m_list);
+        divider->setFlags(Qt::NoItemFlags);
+        divider->setFont(hf);
+    }
 
     for (const auto& d : m_devices) {
         // Build "[tag] name  —  host api  (extra)" so the user can see at a
@@ -103,7 +133,32 @@ void AudioDevicePicker::onSelectionChanged() {
         m_detailLabel->setText(tr("No device selected."));
         return;
     }
-    const int idx = items.first()->data(Qt::UserRole).toInt();
+
+    auto* picked = items.first();
+    const int idx = picked->data(Qt::UserRole).toInt();
+
+    // Monitor-source picks have UserRole == -1 and the source name in +1.
+    if (idx == -1) {
+        const QString monitor = picked->data(Qt::UserRole + 1).toString();
+        if (monitor.isEmpty()) {
+            m_okButton->setEnabled(false);
+            return;
+        }
+        m_okButton->setEnabled(true);
+        m_detailLabel->setText(
+            tr("System audio (monitor source)\n"
+               "Name: %1\n"
+               "Selecting this redirects the system default input to this "
+               "monitor via `pactl set-default-source` before opening "
+               "PortAudio. The change persists until you set it back."
+              ).arg(monitor));
+        // Sample rate combo is populated against the resolved default device
+        // — the actual PortAudio default index is queried later.
+        const int defaultIdx = m_devices.isEmpty() ? -1 : m_devices.first().index;
+        refreshSampleRates(defaultIdx);
+        return;
+    }
+
     if (idx < 0) {
         m_okButton->setEnabled(false);
         m_rateCombo->setEnabled(false);
@@ -165,10 +220,22 @@ void AudioDevicePicker::refreshSampleRates(int deviceIndex) {
 void AudioDevicePicker::onAccept() {
     const auto items = m_list->selectedItems();
     if (items.isEmpty()) return;
-    m_deviceIndex = items.first()->data(Qt::UserRole).toInt();
-    if (m_deviceIndex < 0) return;
 
-    // Pull the sample rate from the combo — the user may have changed it.
+    auto* picked = items.first();
+    const int idx = picked->data(Qt::UserRole).toInt();
+
+    if (idx == -1) {
+        // Monitor source pick. The engine's worker will resolve the
+        // PortAudio default device index after pactl runs.
+        m_monitorSource = picked->data(Qt::UserRole + 1).toString();
+        if (m_monitorSource.isEmpty()) return;
+        m_deviceIndex   = -1;
+    } else {
+        if (idx < 0) return;
+        m_deviceIndex   = idx;
+        m_monitorSource.clear();
+    }
+
     const QVariant rateData = m_rateCombo->currentData();
     if (rateData.isValid()) m_sampleRate = static_cast<float>(rateData.toInt());
 

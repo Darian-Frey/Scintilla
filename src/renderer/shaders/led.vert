@@ -20,11 +20,13 @@ out vec3 vNormal;
 out vec3 vWorldPos;
 out float vScale;
 
-// LED sphere radius — matches prototype constant 0.38 (DEC-002)
-const float kRadius = 0.38;
+// LED sphere radius. Default 0.095 (DEC-028) but user-tunable at runtime
+// via the "LED size" slider in the status bar. See DEC-002 / DEC-028 for
+// the value history.
+uniform float uLedRadius;
 
 void main() {
-    vec3 scaledPos = iWorldPos + aPos * kRadius * iScale;
+    vec3 scaledPos = iWorldPos + aPos * uLedRadius * iScale;
     gl_Position    = uVP * vec4(scaledPos, 1.0);
 
     // Pass through for fragment lighting

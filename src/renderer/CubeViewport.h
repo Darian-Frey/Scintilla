@@ -43,6 +43,7 @@ public:
     void setShowBounds(bool show);
     void setShowAxisGizmo(bool show);
     void setAutoRotate(bool on);
+    void setLedRadius(float r);                 // clamped to (0, 1.0]; default 0.095 per DEC-028
 
     // ── Immediate updates (called from MainWindow when state changes) ─────────
     void refreshFrame();    // re-upload instance buffer from current frame
@@ -114,6 +115,7 @@ private:
     bool        m_showBounds    = true;
     bool        m_showAxisGizmo = true;
     bool        m_initialized   = false;   // initializeGL has run
+    float       m_ledRadius     = 0.095f;  // DEC-028 default; user-adjustable via status bar
 
     // Optional reactive override: when set, takes precedence over m_timeline.
     bool        m_haveReactive  = false;

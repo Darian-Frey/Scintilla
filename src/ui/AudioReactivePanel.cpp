@@ -44,6 +44,9 @@ void AudioReactivePanel::buildLayout() {
     m_modeCombo->addItem(tr("Beat pulse"),      static_cast<int>(ReactiveMode::BeatPulse));
     m_modeCombo->addItem(tr("Waveform"),        static_cast<int>(ReactiveMode::WaveformSlice));
     m_modeCombo->addItem(tr("Spectral colour"), static_cast<int>(ReactiveMode::SpectralColour));
+    m_modeCombo->addItem(tr("Radial EQ"),       static_cast<int>(ReactiveMode::RadialEq));
+    m_modeCombo->addItem(tr("Tunnel"),          static_cast<int>(ReactiveMode::Tunnel));
+    m_modeCombo->addItem(tr("Energy floor"),    static_cast<int>(ReactiveMode::EnergyFloor));
     modeForm->addRow(tr("Reactive:"), m_modeCombo);
     connect(m_modeCombo, qOverload<int>(&QComboBox::currentIndexChanged),
             this, &AudioReactivePanel::onModeIndex);

@@ -16,6 +16,9 @@ enum class ReactiveMode {
     BeatPulse,       // onset detection → radial expanding sphere
     WaveformSlice,   // raw waveform → single-axis oscilloscope
     SpectralColour,  // spectral centroid → hue; RMS → brightness
+    RadialEq,        // bands → concentric shells from cube centre outward
+    Tunnel,          // current spectrum at Z=n-1; past frames recede to Z=0
+    EnergyFloor,     // RMS-driven wall rises from Y=0; X axis coloured by band
 };
 
 enum class ReactiveBlend {
@@ -80,8 +83,27 @@ public:
     // to initialise.
     [[nodiscard]] static QList<int> supportedSampleRates(int deviceIndex);
 
+    // ── PulseAudio / PipeWire monitor source routing ─────────────────────────
+    //
+    // PortAudio's ALSA host API can't see PulseAudio monitor sources
+    // directly. We enumerate them via `pactl list sources` and use
+    // `pactl set-default-source` to redirect "default" to a chosen monitor
+    // before opening the PortAudio stream. This is the only reliable way to
+    // capture the system audio mix on Ubuntu / PipeWire without a custom
+    // PortAudio build.
+    struct MonitorSource {
+        QString name;        // e.g. "alsa_output.pci-0000_00_1f.3.analog-stereo.monitor"
+        QString description; // e.g. "Monitor of Built-in Audio Analog Stereo"
+    };
+    [[nodiscard]] static bool                isMonitorRoutingSupported();
+    [[nodiscard]] static QList<MonitorSource> enumerateMonitors();
+
     // ── Lifecycle ─────────────────────────────────────────────────────────────
-    void start(int deviceIndex, float sampleRate = 44100.0f);
+    // monitorSource: if non-empty, pactl set-default-source <name> is run
+    // before PortAudio opens, and deviceIndex is replaced with the resolved
+    // "default" device. Empty = use deviceIndex as the literal PortAudio device.
+    void start(int deviceIndex, float sampleRate = 44100.0f,
+               const QString& monitorSource = QString());
     void stop();
 
     // ── Capture mode (DEC-014) ────────────────────────────────────────────────
@@ -104,6 +126,9 @@ private:
     [[nodiscard]] VoxelFrame modeBeatPulse(const BandData& d);
     [[nodiscard]] VoxelFrame modeWaveformSlice(const BandData& d);   // mutates m_waveformHistory
     [[nodiscard]] VoxelFrame modeSpectralColour(const BandData& d) const;
+    [[nodiscard]] VoxelFrame modeRadialEq(const BandData& d) const;
+    [[nodiscard]] VoxelFrame modeTunnel(const BandData& d);          // mutates m_tunnelHistory
+    [[nodiscard]] VoxelFrame modeEnergyFloor(const BandData& d) const;
 
     // Applies blend to combine reactive frame with base frame (DEC-013)
     [[nodiscard]] VoxelFrame applyBlend(VoxelFrame reactive) const;
@@ -139,6 +164,12 @@ private:
     std::vector<std::vector<int>> m_waveformHistory;
     int m_waveformScrollDivider = 1;   // frames per row shift; 1 = shift every frame
     int m_waveformFrameCounter  = 0;   // counts up to the divider
+
+    // Tunnel mode state — circular buffer of N band snapshots, one per Z
+    // slice. m_tunnelHead points to the slot where the next frame will be
+    // written. Memory cost is gridSize × 32 floats; trivial.
+    std::vector<std::array<float, 32>> m_tunnelHistory;
+    int m_tunnelHead = 0;
 
     // Worker thread
     QThread*     m_thread = nullptr;

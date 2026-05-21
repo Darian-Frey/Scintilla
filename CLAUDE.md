@@ -152,6 +152,6 @@ scintilla/
 - Shane uses the project-scaffold documentation standard. New docs get IDs in the D-NNN series.
 - Binding decisions go in `docs/D-001-decisions.md` with the date and rationale.
 - Do not refactor the prototype renderer logic without confirming — it is the reference implementation.
-- The ghost LED opacity (0.22) and LED radius (0.38) were tuned visually; treat as constants.
+- The ghost LED opacity (0.22) and radii (lit = 0.095 per DEC-028, ghost = 0.17) were tuned visually; treat as constants. (DEC-002 originally specified lit radius 0.38; DEC-028 re-tuned it for the Phase 3 Fresnel-glow renderer.)
 - `sliceX/Y/Z = -1` means "show all"; this convention must be preserved in any port.
 - **Maintenance Rule 8 (`BUGS.md` / `IMPROVEMENTS.md` discipline).** When you discover a bug while working on something else, **log it in `BUGS.md` rather than silently fixing it**. Same for refactor opportunities — log in `IMPROVEMENTS.md`. The user decides whether to act now, defer, or decline. This rule is load-bearing for AI-partner workflows and binding for this project as of DEC-027 (2026-05-21). Exception: an in-flight discovery that *actively blocks* the task you're on can be fixed alongside, but must still be logged as a BUG/IMP entry referencing the fix commit.
