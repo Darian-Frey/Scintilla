@@ -9,6 +9,7 @@
 #include "core/JsonSerializer.h"
 #include "audio/AudioReactiveEngine.h"
 #include "audio/AudioDevicePicker.h"
+#include "scripting/PresetRunner.h"
 
 #include <QAction>
 #include <QActionGroup>
@@ -23,7 +24,9 @@
 #include <QScrollArea>
 #include <QSlider>
 #include <QStatusBar>
+#include <QTimer>
 #include <QToolBar>
+#include <cmath>
 
 namespace {
     constexpr int kDefaultGrid = 8;
@@ -143,6 +146,8 @@ void MainWindow::buildMenus() {
     file->addAction(tr("&Open…"),     QKeySequence::Open,   this, &MainWindow::onOpen);
     file->addAction(tr("&Save"),      QKeySequence::Save,   this, &MainWindow::onSave);
     file->addAction(tr("Save &As…"),  QKeySequence::SaveAs, this, &MainWindow::onSaveAs);
+    file->addSeparator();
+    file->addAction(tr("&Run preset…"), this, &MainWindow::onRunPreset);
     file->addSeparator();
     file->addAction(tr("E&xit"),      QKeySequence::Quit,   qApp, &QApplication::quit);
 
@@ -484,6 +489,137 @@ void MainWindow::onReactiveFrameCaptured(VoxelFrame f) {
     m_timeline->addFrame();
     m_timeline->currentFrame() = std::move(f);
     m_timeline->notifyCurrentFrameEdited();
+}
+
+// ── Preset scripting (Phase 4 step B — offline playback) ────────────────────
+
+namespace {
+    constexpr int kPresetPreviewFrames   = 120;     // ~10 s at 12 fps timeline
+    constexpr int kPresetPlaybackTickMs  = 16;      // ~60 Hz tick
+}
+
+void MainWindow::onRunPreset() {
+    if (m_presetRunner && m_presetRunner->isLoaded()) {
+        QMessageBox::information(this, tr("Preset already running"),
+            tr("A preset is currently playing. Wait for it to finish or open "
+               "a new project to interrupt."));
+        return;
+    }
+
+    const QString defaultDir = QDir(QCoreApplication::applicationDirPath())
+                                   .absoluteFilePath(QStringLiteral("../presets"));
+    const QString path = QFileDialog::getOpenFileName(
+        this, tr("Run preset"), defaultDir,
+        tr("Python presets (*.py)"));
+    if (path.isEmpty()) return;
+
+    if (!confirmDiscardIfDirty(tr("Running a preset appends generated frames to the timeline. Continue?"))) {
+        return;
+    }
+
+    // Construct the runner lazily; reuse across calls.
+    if (!m_presetRunner) {
+        m_presetRunner = std::make_unique<PresetRunner>(this);
+        connect(m_presetRunner.get(), &PresetRunner::frameReady,
+                this, &MainWindow::onPresetFrameReady);
+        connect(m_presetRunner.get(), &PresetRunner::presetLoaded,
+                this, &MainWindow::onPresetLoaded);
+        connect(m_presetRunner.get(), &PresetRunner::errorOccurred,
+                this, &MainWindow::onPresetError);
+    }
+
+    m_presetRunner->setCubeMeta(m_mask->gridSize(),
+                                QString::fromStdString(shapeTypeName(m_mask->shape())),
+                                m_mask->count());
+
+    m_presetFramesRequested = kPresetPreviewFrames;
+    m_presetFramesSent      = 0;
+    m_presetFramesReceived  = 0;
+
+    // Clear the timeline before populating with new generated frames.
+    m_timeline->clearAll();
+    statusBar()->showMessage(tr("Loading preset %1…").arg(QFileInfo(path).fileName()),
+                             4000);
+
+    m_presetRunner->loadPreset(path);
+
+    // Drive the offline playback via a timer. Synthetic audio (slow sine
+    // bands + periodic beats) so presets that ignore the audio argument
+    // still animate, and presets that use it have something to react to.
+    if (!m_presetPlaybackTimer) {
+        m_presetPlaybackTimer = new QTimer(this);
+        connect(m_presetPlaybackTimer, &QTimer::timeout,
+                this, &MainWindow::tickPresetPlayback);
+    }
+    m_presetPlaybackTimer->start(kPresetPlaybackTickMs);
+}
+
+void MainWindow::tickPresetPlayback() {
+    if (!m_presetRunner || !m_presetRunner->isLoaded()) {
+        // Subprocess died or wasn't ready yet; let onPresetError handle the
+        // surface message.
+        if (m_presetFramesSent >= m_presetFramesRequested) {
+            m_presetPlaybackTimer->stop();
+        }
+        return;
+    }
+
+    if (m_presetFramesSent >= m_presetFramesRequested) {
+        // All frames queued — stop the timer; the runner may still be
+        // returning the last few responses, which onPresetFrameReady will
+        // handle as they arrive.
+        m_presetPlaybackTimer->stop();
+        m_presetRunner->unload();
+        statusBar()->showMessage(
+            tr("Preset playback queued %1 frames; received %2 so far.")
+                .arg(m_presetFramesRequested)
+                .arg(m_presetFramesReceived),
+            4000);
+        return;
+    }
+
+    // Synthetic audio: each band a phase-shifted sine, RMS a slow oscillation,
+    // beat every ~30 frames. Lets the playback drive both audio-naive and
+    // audio-driven presets to a believable result.
+    BandData bd;
+    const int n = m_mask->gridSize();
+    const float t = static_cast<float>(m_presetFramesSent) * 0.05f;
+    for (int i = 0; i < n && i < static_cast<int>(bd.bands.size()); ++i) {
+        bd.bands[static_cast<size_t>(i)] =
+            0.5f + 0.35f * std::sin(t + static_cast<float>(i) * 0.6f);
+    }
+    bd.rms      = 0.25f + 0.15f * std::sin(t * 0.7f);
+    bd.centroid = 0.5f  + 0.25f * std::sin(t * 0.3f);
+    bd.beat     = (m_presetFramesSent % 30 == 0);
+
+    m_presetRunner->pushFrame(bd);
+    ++m_presetFramesSent;
+}
+
+void MainWindow::onPresetFrameReady(VoxelFrame f) {
+    if (m_presetFramesReceived == 0) {
+        // First frame replaces the (already-cleared) initial frame so the
+        // timeline starts at frame 1 with content, not an empty frame + new.
+        m_timeline->currentFrame() = std::move(f);
+        m_timeline->notifyCurrentFrameEdited();
+    } else {
+        m_timeline->addFrame();
+        m_timeline->currentFrame() = std::move(f);
+        m_timeline->notifyCurrentFrameEdited();
+    }
+    ++m_presetFramesReceived;
+}
+
+void MainWindow::onPresetLoaded(const QString& name) {
+    statusBar()->showMessage(tr("Preset loaded: %1").arg(name), 3000);
+}
+
+void MainWindow::onPresetError(const QString& msg, int line) {
+    if (m_presetPlaybackTimer) m_presetPlaybackTimer->stop();
+    const QString detail = (line >= 0)
+        ? tr("%1\n\n(line %2)").arg(msg).arg(line)
+        : msg;
+    QMessageBox::warning(this, tr("Preset error"), detail);
 }
 
 void MainWindow::onAudioError(const QString& msg) {

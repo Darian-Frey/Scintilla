@@ -65,6 +65,8 @@ set(SOURCES
     src/audio/AudioReactiveEngine.cpp
     src/audio/AudioDevicePicker.cpp
 
+    src/scripting/PresetRunner.cpp
+
     src/util/CrashHandler.cpp
 )
 
@@ -90,6 +92,8 @@ set(HEADERS
     src/audio/FFTProcessor.h
     src/audio/AudioReactiveEngine.h
     src/audio/AudioDevicePicker.h
+
+    src/scripting/PresetRunner.h
 
     src/util/CrashHandler.h
 )

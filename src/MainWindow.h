@@ -14,8 +14,10 @@ class TimelineWidget;
 class FrameInfoPanel;
 class AudioReactiveEngine;
 class AudioReactivePanel;
+class PresetRunner;
 class QActionGroup;
 class QAction;
+class QTimer;
 
 enum class Tool;
 enum class ReactiveMode;
@@ -69,6 +71,13 @@ private slots:
     void onReactiveFrameCaptured(VoxelFrame f);
     void onAudioError(const QString& msg);
 
+    // ── Preset scripting (Phase 4 — offline playback for step B) ─────────────
+    void onRunPreset();
+    void onPresetFrameReady(VoxelFrame f);
+    void onPresetLoaded(const QString& name);
+    void onPresetError(const QString& msg, int line);
+    void tickPresetPlayback();
+
 private:
     void buildMenus();
     void buildToolbar();
@@ -99,4 +108,11 @@ private:
     int         m_audioDeviceIndex      = -1;
     float       m_audioSampleRate       = 44100.0f;
     QString     m_audioMonitorSource;            // empty unless user picked one
+
+    // ── Preset scripting (Phase 4) ────────────────────────────────────────────
+    std::unique_ptr<PresetRunner> m_presetRunner;
+    QTimer*  m_presetPlaybackTimer = nullptr;
+    int      m_presetFramesRequested = 0;       // total frames to send
+    int      m_presetFramesSent      = 0;       // sent so far
+    int      m_presetFramesReceived  = 0;       // returned by the preset so far
 };
