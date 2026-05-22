@@ -1,21 +1,21 @@
 #pragma once
 
 #include <QWidget>
-#include <vector>
 
 #include "core/AnimationTimeline.h"
 
-class QScrollArea;
-class QHBoxLayout;
 class QPushButton;
 class QSpinBox;
 class QComboBox;
+class QSlider;
+class QLabel;
 
 // ── TimelineWidget ───────────────────────────────────────────────────────────
 //
-// Horizontal strip of frame cells + playback controls.
-// Each cell shows its frame index and a colour dot (first lit voxel's colour).
-// Reacts to AnimationTimeline signals and drives back via slot calls.
+// Scrubber + readout style timeline. A horizontal QSlider seeks the current
+// frame; a label to its right shows "Frame i / N · t.tts / t.tts · L lit".
+// Playback controls (Play/+Frame/Duplicate/Delete) and FPS / Mode live on a
+// separate row above the scrubber.
 
 class TimelineWidget : public QWidget {
     Q_OBJECT
@@ -26,12 +26,12 @@ public:
     void setTimeline(AnimationTimeline* tl);
 
 private slots:
-    void rebuildCells();
     void onCurrentChanged(int idx);
     void onContentChanged(int idx);
+    void onStructureChanged();
     void onPlaybackStateChanged(bool playing);
 
-    void onCellClicked(int idx);
+    void onSliderValueChanged(int value);
     void onPlayStop();
     void onAddFrame();
     void onDuplicateFrame();
@@ -41,14 +41,10 @@ private slots:
 
 private:
     void buildLayout();
-    void styleCell(int idx);
+    void refreshSliderRange();
+    void refreshReadout();
 
     AnimationTimeline* m_timeline = nullptr;
-
-    QScrollArea* m_scroll      = nullptr;
-    QWidget*     m_cellsHost   = nullptr;
-    QHBoxLayout* m_cellsLayout = nullptr;
-    std::vector<QPushButton*> m_cells;
 
     QPushButton* m_playStop   = nullptr;
     QPushButton* m_addBtn     = nullptr;
@@ -56,4 +52,7 @@ private:
     QPushButton* m_delBtn     = nullptr;
     QSpinBox*    m_fpsSpin    = nullptr;
     QComboBox*   m_modeCombo  = nullptr;
+
+    QSlider*     m_scrubber   = nullptr;
+    QLabel*      m_readout    = nullptr;
 };

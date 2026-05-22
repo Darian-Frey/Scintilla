@@ -4,30 +4,12 @@
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QPushButton>
-#include <QScrollArea>
+#include <QSignalBlocker>
+#include <QSlider>
 #include <QSpinBox>
 #include <QVBoxLayout>
 
-namespace {
-    constexpr int kCellSize = 48;
-
-    QString cellStyleFor(QColor dot, bool selected) {
-        const QString border = selected
-            ? QStringLiteral("border:2px solid #f0f0f0;")
-            : QStringLiteral("border:1px solid #444;");
-        return QString(
-            "QPushButton { background:#181822; color:#ccc; %1 padding:2px; }"
-            "QPushButton::indicator { background:%2; }"
-        ).arg(border, dot.name());
-    }
-
-    QColor firstLitDot(const VoxelFrame& f) {
-        const auto& v = f.voxels();
-        if (v.empty()) return QColor(40, 40, 50);
-        const RGB c = v.begin()->second;
-        return QColor(c[0], c[1], c[2]);
-    }
-}
+#include <algorithm>
 
 // ── Construction ─────────────────────────────────────────────────────────────
 
@@ -39,7 +21,7 @@ void TimelineWidget::buildLayout() {
     auto* root = new QVBoxLayout(this);
     root->setContentsMargins(4, 4, 4, 4);
 
-    // Controls row
+    // ── Controls row ─────────────────────────────────────────────────────────
     auto* controls = new QHBoxLayout();
     m_playStop = new QPushButton(tr("Play"), this);
     m_addBtn   = new QPushButton(tr("+ Frame"), this);
@@ -77,20 +59,26 @@ void TimelineWidget::buildLayout() {
     controls->addStretch(1);
     root->addLayout(controls);
 
-    // Cell strip
-    m_scroll = new QScrollArea(this);
-    m_scroll->setWidgetResizable(true);
-    m_scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
-    m_scroll->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-    m_scroll->setFixedHeight(kCellSize + 16);
+    // ── Scrubber + readout row ───────────────────────────────────────────────
+    auto* scrubRow = new QHBoxLayout();
+    m_scrubber = new QSlider(Qt::Horizontal, this);
+    m_scrubber->setMinimum(0);
+    m_scrubber->setMaximum(0);
+    m_scrubber->setSingleStep(1);
+    m_scrubber->setPageStep(1);
+    m_scrubber->setTracking(true);
+    connect(m_scrubber, &QSlider::valueChanged,
+            this, &TimelineWidget::onSliderValueChanged);
+    scrubRow->addWidget(m_scrubber, 1);
 
-    m_cellsHost   = new QWidget();
-    m_cellsLayout = new QHBoxLayout(m_cellsHost);
-    m_cellsLayout->setContentsMargins(2, 2, 2, 2);
-    m_cellsLayout->setSpacing(2);
-    m_cellsLayout->addStretch(1);
-    m_scroll->setWidget(m_cellsHost);
-    root->addWidget(m_scroll);
+    m_readout = new QLabel(this);
+    m_readout->setMinimumWidth(260);
+    m_readout->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+    scrubRow->addWidget(m_readout);
+
+    root->addLayout(scrubRow);
+
+    refreshReadout();
 }
 
 // ── Timeline wiring ──────────────────────────────────────────────────────────
@@ -101,7 +89,7 @@ void TimelineWidget::setTimeline(AnimationTimeline* tl) {
     if (!m_timeline) return;
 
     connect(m_timeline, &AnimationTimeline::timelineStructureChanged,
-            this, &TimelineWidget::rebuildCells);
+            this, &TimelineWidget::onStructureChanged);
     connect(m_timeline, &AnimationTimeline::currentFrameChanged,
             this, &TimelineWidget::onCurrentChanged);
     connect(m_timeline, &AnimationTimeline::frameContentChanged,
@@ -110,75 +98,86 @@ void TimelineWidget::setTimeline(AnimationTimeline* tl) {
             this, &TimelineWidget::onPlaybackStateChanged);
 
     m_fpsSpin->setValue(m_timeline->fps());
-    rebuildCells();
+    refreshSliderRange();
+    refreshReadout();
 }
 
-// ── Rebuild / update ─────────────────────────────────────────────────────────
+// ── Timeline → UI ────────────────────────────────────────────────────────────
 
-void TimelineWidget::rebuildCells() {
+void TimelineWidget::onStructureChanged() {
+    refreshSliderRange();
+    refreshReadout();
+}
+
+void TimelineWidget::onCurrentChanged(int idx) {
     if (!m_timeline) return;
-    // Wipe old cells (preserve the trailing stretch which is the last layout item).
-    for (auto* cell : m_cells) {
-        m_cellsLayout->removeWidget(cell);
-        cell->deleteLater();
-    }
-    m_cells.clear();
-
-    for (int i = 0; i < m_timeline->frameCount(); ++i) {
-        auto* b = new QPushButton(QString::number(i + 1), m_cellsHost);
-        b->setFixedSize(kCellSize, kCellSize);
-        connect(b, &QPushButton::clicked, this, [this, i]() { onCellClicked(i); });
-        m_cellsLayout->insertWidget(static_cast<int>(m_cells.size()), b);
-        m_cells.push_back(b);
-        styleCell(i);
-    }
+    QSignalBlocker block(m_scrubber);
+    m_scrubber->setValue(idx);
+    refreshReadout();
 }
 
-void TimelineWidget::onCurrentChanged(int /*idx*/) {
-    for (size_t i = 0; i < m_cells.size(); ++i) styleCell(static_cast<int>(i));
-    if (!m_cells.empty() && m_timeline) {
-        // Scroll the selected cell into view.
-        const int idx = m_timeline->currentIndex();
-        if (idx >= 0 && static_cast<size_t>(idx) < m_cells.size()) {
-            m_scroll->ensureWidgetVisible(m_cells[static_cast<size_t>(idx)]);
-        }
-    }
-}
-
-void TimelineWidget::onContentChanged(int idx) {
-    if (idx >= 0 && static_cast<size_t>(idx) < m_cells.size()) styleCell(idx);
+void TimelineWidget::onContentChanged(int /*idx*/) {
+    refreshReadout();
 }
 
 void TimelineWidget::onPlaybackStateChanged(bool playing) {
     m_playStop->setText(playing ? tr("Stop") : tr("Play"));
 }
 
-void TimelineWidget::styleCell(int idx) {
-    if (!m_timeline || idx < 0 || static_cast<size_t>(idx) >= m_cells.size()) return;
-    const bool selected = (idx == m_timeline->currentIndex());
-    m_cells[static_cast<size_t>(idx)]->setStyleSheet(
-        cellStyleFor(firstLitDot(m_timeline->frameAt(idx)), selected));
+// ── UI → timeline ────────────────────────────────────────────────────────────
+
+void TimelineWidget::onSliderValueChanged(int value) {
+    if (!m_timeline) return;
+    if (value == m_timeline->currentIndex()) return;
+    m_timeline->selectFrame(value);
 }
 
-// ── Action slots ─────────────────────────────────────────────────────────────
-
-void TimelineWidget::onCellClicked(int idx)      { if (m_timeline) m_timeline->selectFrame(idx); }
-void TimelineWidget::onAddFrame()                { if (m_timeline) m_timeline->addFrame(); }
-void TimelineWidget::onDuplicateFrame()          { if (m_timeline) m_timeline->duplicateCurrent(); }
-void TimelineWidget::onDeleteFrame()             { if (m_timeline) m_timeline->deleteCurrent(); }
+void TimelineWidget::onAddFrame()       { if (m_timeline) m_timeline->addFrame(); }
+void TimelineWidget::onDuplicateFrame() { if (m_timeline) m_timeline->duplicateCurrent(); }
+void TimelineWidget::onDeleteFrame()    { if (m_timeline) m_timeline->deleteCurrent(); }
 
 void TimelineWidget::onPlayStop() {
     if (!m_timeline) return;
     if (m_timeline->isPlaying()) m_timeline->stop();
-    else                          m_timeline->play();
+    else                         m_timeline->play();
 }
 
 void TimelineWidget::onFpsChanged(int fps) {
     if (m_timeline) m_timeline->setFps(fps);
+    refreshReadout();           // total duration depends on fps
 }
 
 void TimelineWidget::onModeChanged(int comboIndex) {
     if (!m_timeline) return;
     m_timeline->setPlaybackMode(
         static_cast<PlaybackMode>(m_modeCombo->itemData(comboIndex).toInt()));
+}
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
+void TimelineWidget::refreshSliderRange() {
+    if (!m_timeline) return;
+    QSignalBlocker block(m_scrubber);
+    const int n = m_timeline->frameCount();
+    m_scrubber->setMaximum(std::max(0, n - 1));
+    m_scrubber->setValue(m_timeline->currentIndex());
+    m_scrubber->setEnabled(n > 1);
+}
+
+void TimelineWidget::refreshReadout() {
+    if (!m_timeline) {
+        m_readout->setText(QString());
+        return;
+    }
+    const int    n    = m_timeline->frameCount();
+    const int    idx  = m_timeline->currentIndex();
+    const int    fps  = std::max(1, m_timeline->fps());
+    const int    lit  = m_timeline->currentFrame().litCount();
+    const double tNow = static_cast<double>(idx) / fps;
+    const double tEnd = static_cast<double>(n)   / fps;
+    m_readout->setText(tr("Frame %1 / %2  ·  %3s / %4s  ·  %5 lit")
+        .arg(idx + 1).arg(n)
+        .arg(tNow, 0, 'f', 2)
+        .arg(tEnd, 0, 'f', 2)
+        .arg(lit));
 }
