@@ -141,6 +141,23 @@ bool AudioReactiveEngine::isMonitorRoutingSupported() {
 
 QList<AudioReactiveEngine::MonitorSource> AudioReactiveEngine::enumerateMonitors() {
     QList<MonitorSource> out;
+
+    // Query the current default sink so we can tag its .monitor as the
+    // "what you're hearing right now" pick — by far the most common
+    // user intent (BUG-015 follow-up).
+    QString defaultSinkMonitor;
+    {
+        QProcess dp;
+        dp.start(QStringLiteral("pactl"),
+                 QStringList{QStringLiteral("get-default-sink")});
+        if (dp.waitForFinished(1000) && dp.exitCode() == 0) {
+            const QString defaultSink = QString::fromUtf8(dp.readAllStandardOutput()).trimmed();
+            if (!defaultSink.isEmpty()) {
+                defaultSinkMonitor = defaultSink + QStringLiteral(".monitor");
+            }
+        }
+    }
+
     QProcess p;
     p.start(QStringLiteral("pactl"), QStringList{QStringLiteral("list"), QStringLiteral("sources")});
     if (!p.waitForFinished(2000)) {
@@ -157,13 +174,19 @@ QList<AudioReactiveEngine::MonitorSource> AudioReactiveEngine::enumerateMonitors
 
     QString currentName;
     QString currentDesc;
+    MonitorSource::State currentState = MonitorSource::State::Unknown;
     auto flush = [&]() {
         if (currentName.endsWith(QStringLiteral(".monitor"))) {
-            out.push_back({currentName,
-                           currentDesc.isEmpty() ? currentName : currentDesc});
+            MonitorSource ms;
+            ms.name          = currentName;
+            ms.description   = currentDesc.isEmpty() ? currentName : currentDesc;
+            ms.isDefaultSink = (currentName == defaultSinkMonitor);
+            ms.state         = currentState;
+            out.push_back(ms);
         }
         currentName.clear();
         currentDesc.clear();
+        currentState = MonitorSource::State::Unknown;
     };
     for (const QString& raw : lines) {
         const QString line = raw.trimmed();
@@ -175,9 +198,20 @@ QList<AudioReactiveEngine::MonitorSource> AudioReactiveEngine::enumerateMonitors
             currentName = line.mid(6);
         } else if (line.startsWith(QStringLiteral("Description: "))) {
             currentDesc = line.mid(13);
+        } else if (line.startsWith(QStringLiteral("State: "))) {
+            const QString s = line.mid(7).trimmed();
+            if      (s == QStringLiteral("RUNNING"))   currentState = MonitorSource::State::Running;
+            else if (s == QStringLiteral("IDLE"))      currentState = MonitorSource::State::Idle;
+            else if (s == QStringLiteral("SUSPENDED")) currentState = MonitorSource::State::Suspended;
         }
     }
     flush();
+
+    // Sort: default-sink monitor first, then alphabetical by description.
+    std::sort(out.begin(), out.end(), [](const MonitorSource& a, const MonitorSource& b) {
+        if (a.isDefaultSink != b.isDefaultSink) return a.isDefaultSink;
+        return a.description.compare(b.description, Qt::CaseInsensitive) < 0;
+    });
     return out;
 }
 

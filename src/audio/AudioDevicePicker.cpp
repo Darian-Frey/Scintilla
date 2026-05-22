@@ -1,5 +1,7 @@
 #include "AudioDevicePicker.h"
 
+#include <QBrush>
+#include <QColor>
 #include <QComboBox>
 #include <QDialogButtonBox>
 #include <QHBoxLayout>
@@ -20,13 +22,18 @@ AudioDevicePicker::AudioDevicePicker(QWidget* parent) : QDialog(parent) {
 void AudioDevicePicker::buildLayout() {
     auto* root = new QVBoxLayout(this);
 
-    root->addWidget(new QLabel(
+    auto* help = new QLabel(
         tr("To capture audio playing on this computer, choose one of the "
-           "[system audio] monitor sources at the top. Selecting one tells "
-           "Scintilla to redirect the system default input to that monitor "
-           "until you change it (or reboot). To capture from a real "
-           "microphone instead, pick a regular device below."),
-        this));
+           "[system audio] monitor sources at the top — most reliably the "
+           "one tagged 'default sink'. Monitor sources tagged SUSPENDED "
+           "are currently silent because your OS isn't routing audio to "
+           "that output. To use a different one, change your system audio "
+           "output (system tray volume icon → output device) first, then "
+           "re-open this picker. The redirect is per-stream — your "
+           "microphone stays available to other apps."),
+        this);
+    help->setWordWrap(true);
+    root->addWidget(help);
 
     m_list = new QListWidget(this);
     connect(m_list, &QListWidget::itemSelectionChanged,
@@ -82,15 +89,35 @@ void AudioDevicePicker::populate() {
         header->setFont(hf);
 
         for (const auto& m : m_monitors) {
+            const QString tag = m.isDefaultSink
+                ? tr("[system audio · default sink — picks the audio you're hearing right now]")
+                : tr("[system audio]");
+            QString stateTag;
+            switch (m.state) {
+                case AudioReactiveEngine::MonitorSource::State::Running:
+                    stateTag = tr("  · RUNNING");        break;
+                case AudioReactiveEngine::MonitorSource::State::Idle:
+                    stateTag = tr("  · IDLE");           break;
+                case AudioReactiveEngine::MonitorSource::State::Suspended:
+                    stateTag = tr("  · SUSPENDED (no audio routed here right now)"); break;
+                case AudioReactiveEngine::MonitorSource::State::Unknown:
+                    break;
+            }
             auto* it = new QListWidgetItem(
-                tr("[system audio] %1").arg(m.description), m_list);
+                QStringLiteral("%1 %2%3").arg(tag, m.description, stateTag), m_list);
             // UserRole = -1 sentinel meaning "this is a monitor pick"; the
             // monitor name lives in UserRole+1.
             it->setData(Qt::UserRole,     -1);
             it->setData(Qt::UserRole + 1, m.name);
+
             QFont f = it->font();
             f.setBold(true);
             it->setFont(f);
+
+            // Dim suspended entries so the user's eye lands on RUNNING ones.
+            if (m.state == AudioReactiveEngine::MonitorSource::State::Suspended) {
+                it->setForeground(QBrush(QColor(140, 140, 140)));
+            }
         }
 
         // Divider before PortAudio devices

@@ -55,6 +55,17 @@ that landed before the document existed.
 
 ## Applied
 
+### IMP-009: Delete `AudioRouting` after fixing BUG-013 — no global state to manage
+
+**Status:** applied (2026-05-22, this session)
+**Found:** 2026-05-22 (during the BUG-013 fix)
+**Location:** [src/audio/](src/audio/) (files removed), [src/main.cpp](src/main.cpp), [CMakeLists.txt](CMakeLists.txt)
+**Effort:** trivial
+**Description.** `AudioRouting` existed solely to manage the global side-effect of `pactl set-default-source`: capture the original default before mutating, restore it on clean exit (`QApplication::aboutToQuit`), restore it on crash (signal-safe `fork`+`execve` registered as a `CrashHandler` hook). Once BUG-013 swapped the global-default approach for per-stream `pactl move-source-output`, none of that infrastructure had anything to manage — the move-source-output redirect lives only for the stream's lifetime and disappears when PortAudio closes.
+**Proposal.** Delete `src/audio/AudioRouting.{h,cpp}`. Remove the `AudioRouting::signalSafeRestore` hook registration and the `QApplication::aboutToQuit` lambda from `main.cpp`. Remove the source files from `CMakeLists.txt`. Keep `CrashHandler` itself — its value (stack traces on fatal signals) is independent of audio routing.
+**Trade-offs.** Removes ~140 lines of code and the dependency on `pactl get-default-source` at startup. Loses the "explicit save-and-restore" model in case the per-stream approach turns out to have edge cases we haven't seen — but that's a hypothetical against a confirmed-working alternative.
+**Notes.** Side benefit: simpler mental model for anyone reading the audio pipeline. The decision tree shrinks from "are we mutating global state? have we saved? have we restored on every exit path including crashes?" to "did Pa_StartStream succeed? if yes, move this one source-output."
+
 ### IMP-007: `pkg_check_modules` instead of `find_package(PortAudio)`
 
 **Status:** applied (2026-05-21, this session)

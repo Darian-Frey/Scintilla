@@ -1,13 +1,14 @@
 #include "AudioWorker.h"
 
 #include <portaudio.h>
+#include <QCoreApplication>
 #include <QDebug>
 #include <QMetaType>
+#include <QProcess>
+#include <QThread>
 #include <QTimer>
 #include <algorithm>
 #include <vector>
-
-#include "AudioRouting.h"
 
 // ── RingBuffer ───────────────────────────────────────────────────────────────
 //
@@ -116,18 +117,12 @@ int AudioWorker::paCallback(const void* input, void* /*output*/,
 void AudioWorker::start() {
     if (m_paStream) return;
 
-    // Redirect the PulseAudio / PipeWire default source to the chosen monitor
-    // *before* PortAudio opens — the open call captures whatever the default
-    // is at that moment, and the ALSA host API can't see monitor sources by
-    // name. AudioRouting captures the prior default on first use so the
-    // crash handler / clean-exit hook can restore it.
-    if (!m_monitorSource.isEmpty()) {
-        if (!AudioRouting::setDefaultSource(m_monitorSource)) {
-            emit errorOccurred(tr("Failed to set system default source to %1")
-                                   .arg(m_monitorSource));
-            return;
-        }
-    }
+    qDebug().noquote() << "[audio] AudioWorker::start"
+                       << "  deviceIndex(initial)=" << m_deviceIndex
+                       << "  sampleRate="          << m_sampleRate
+                       << "  monitorSource="       << (m_monitorSource.isEmpty()
+                                                       ? QStringLiteral("(none)")
+                                                       : m_monitorSource);
 
     if (Pa_Initialize() != paNoError) {
         emit errorOccurred(tr("Pa_Initialize failed"));
@@ -140,6 +135,8 @@ void AudioWorker::start() {
     if (!m_monitorSource.isEmpty()) {
         const PaDeviceIndex def = Pa_GetDefaultInputDevice();
         if (def != paNoDevice) m_deviceIndex = def;
+        qDebug().noquote() << "[audio] resolved monitor-route to PortAudio default device"
+                           << "index=" << m_deviceIndex;
     }
 
     PaStreamParameters params{};
@@ -179,6 +176,86 @@ void AudioWorker::start() {
         return;
     }
 
+    // Per-stream routing for system-audio capture (BUG-013): on PipeWire
+    // systems the ALSA pcm.pipewire plugin bypasses libpulse, so PULSE_SOURCE
+    // and pactl set-default-source don't reliably redirect *this* stream.
+    // Diagnostic tests showed `pactl move-source-output` works per-stream
+    // with no global side effects, so we use that after Pa_StartStream:
+    //
+    //   1. Open PortAudio normally — binds source-output to whatever PipeWire
+    //      picks (usually the system default mic).
+    //   2. Poll `pactl list source-outputs` for ours, identified by the
+    //      "PipeWire ALSA [Scintilla]" substring in the application.name
+    //      property — the pcm.pipewire plugin doesn't set
+    //      application.process.id, so we can't match by PID (BUG-014).
+    //   3. `pactl move-source-output <id> <monitor>` to redirect just our
+    //      stream. The redirect lives only as long as the stream; nothing
+    //      to undo on stop, nothing to restore on crash.
+    if (!m_monitorSource.isEmpty()) {
+        // application.name is "PipeWire ALSA [<binary>]" — match the binary
+        // suffix verbatim. Verified against the diagnostic capture in
+        // /home/azathoth/Scintilla session.
+        const QString appNameMarker = QStringLiteral("[Scintilla]");
+        QString outputId;
+
+        // PipeWire registers the source-output shortly after Pa_StartStream;
+        // poll up to ~3 s in 50 ms intervals (PortAudio's first connection
+        // can take noticeably longer than aplay's, so 1 s wasn't enough).
+        for (int tries = 0; tries < 60 && outputId.isEmpty(); ++tries) {
+            QProcess listProc;
+            listProc.start(QStringLiteral("pactl"),
+                           QStringList{QStringLiteral("list"),
+                                       QStringLiteral("source-outputs")});
+            if (!listProc.waitForFinished(2000)) {
+                listProc.kill();
+                listProc.waitForFinished(200);
+            } else if (listProc.exitCode() == 0) {
+                const QString text  = QString::fromUtf8(listProc.readAllStandardOutput());
+                const QStringList chunks =
+                    text.split(QStringLiteral("Source Output #"), Qt::SkipEmptyParts);
+                for (const QString& chunk : chunks) {
+                    if (!chunk.contains(appNameMarker)) continue;
+                    const int nl = chunk.indexOf('\n');
+                    outputId = chunk.left(nl).trimmed();
+                    break;
+                }
+            }
+            if (outputId.isEmpty()) QThread::msleep(50);
+        }
+
+        if (outputId.isEmpty()) {
+            qWarning() << "[audio] Could not find own source-output after 3s";
+            emit errorOccurred(
+                tr("Couldn't find Scintilla's source-output after 3s; "
+                   "capture will use the system default input instead."));
+        } else {
+            qDebug().noquote() << "[audio] found own source-output id=" << outputId
+                               << "  moving to" << m_monitorSource;
+            QProcess moveProc;
+            moveProc.start(QStringLiteral("pactl"),
+                           QStringList{QStringLiteral("move-source-output"),
+                                       outputId, m_monitorSource});
+            if (!moveProc.waitForFinished(2000) || moveProc.exitCode() != 0) {
+                qWarning().noquote()
+                    << "[audio] move-source-output failed:"
+                    << QString::fromUtf8(moveProc.readAllStandardError()).trimmed();
+                emit errorOccurred(
+                    tr("pactl move-source-output failed: %1")
+                        .arg(QString::fromUtf8(moveProc.readAllStandardError()).trimmed()));
+            } else {
+                qDebug() << "[audio] move-source-output succeeded";
+            }
+        }
+
+        // Discard the few hundred ms of pre-move data captured from the
+        // system default so the visualisation starts cleanly on the monitor.
+        const size_t available = m_ring.available();
+        if (available > 0) {
+            std::vector<float> dump(available);
+            m_ring.read(dump.data(), available);
+        }
+    }
+
     // Drain the ring on a Qt timer running on this worker's thread. The
     // worker is moved-to-thread before start() fires, so this timer ticks
     // on the worker thread (not the GUI thread or the PA callback thread).
@@ -189,7 +266,23 @@ void AudioWorker::start() {
         buf.resize(FFTProcessor::kFftSize);
         while (m_ring.available() >= FFTProcessor::kFftSize) {
             m_ring.read(buf.data(), FFTProcessor::kFftSize);
-            emit bandsReady(m_fft.process(buf));
+            const auto bands = m_fft.process(buf);
+            ++m_diagFrame;
+            // One-line health check every ~5 s of audio so the user can see
+            // whether real data is flowing into the engine. Cadence picked
+            // to be visible-but-quiet — drop to 50 if you're actively
+            // debugging silent capture.
+            if (m_diagFrame % 250 == 0) {
+                float maxBand = 0.0f;
+                for (float b : bands.bands) if (b > maxBand) maxBand = b;
+                qDebug().noquote()
+                    << "[audio] frame" << m_diagFrame
+                    << " rms="         << QString::number(bands.rms, 'f', 4)
+                    << " maxBand="     << QString::number(maxBand, 'f', 3)
+                    << " centroid="    << QString::number(bands.centroid, 'f', 3)
+                    << " beat="        << (bands.beat ? "Y" : ".");
+            }
+            emit bandsReady(bands);
         }
     });
     timer->start();

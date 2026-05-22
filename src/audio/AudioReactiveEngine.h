@@ -92,8 +92,15 @@ public:
     // capture the system audio mix on Ubuntu / PipeWire without a custom
     // PortAudio build.
     struct MonitorSource {
+        // PulseAudio's per-source state — tells the user whether picking
+        // this one will actually receive any audio. Suspended monitors are
+        // dead buckets until the OS routes audio to their sink.
+        enum class State { Unknown, Running, Idle, Suspended };
+
         QString name;        // e.g. "alsa_output.pci-0000_00_1f.3.analog-stereo.monitor"
         QString description; // e.g. "Monitor of Built-in Audio Analog Stereo"
+        bool    isDefaultSink = false;   // monitor of the current pactl default sink
+        State   state         = State::Unknown;
     };
     [[nodiscard]] static bool                isMonitorRoutingSupported();
     [[nodiscard]] static QList<MonitorSource> enumerateMonitors();

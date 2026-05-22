@@ -87,6 +87,7 @@ private:
     RingBuffer  m_ring;
     FFTProcessor m_fft;
     std::atomic<bool> m_running{false};
+    unsigned long m_diagFrame = 0;       // for periodic terminal diagnostic
 
     static constexpr size_t kRingCapacity = 1024 * 16;  // ~370ms at 44100Hz
 };

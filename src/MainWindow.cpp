@@ -409,7 +409,7 @@ void MainWindow::onPickAudioDevice() {
 
     if (!m_audioMonitorSource.isEmpty()) {
         statusBar()->showMessage(
-            tr("System audio routing: %1 (system default input changed via pactl) @ %2 Hz")
+            tr("System audio routing: %1 (per-stream redirect via pactl) @ %2 Hz")
                 .arg(m_audioMonitorSource)
                 .arg(static_cast<double>(m_audioSampleRate)),
             6000);

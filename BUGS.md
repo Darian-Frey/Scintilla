@@ -19,6 +19,42 @@ and resolved before the document existed.
 
 ## Fixed
 
+### BUG-014: Source-output matcher used `application.process.id`, which `pcm.pipewire` doesn't set
+
+**Status:** fixed (2026-05-22, this session)
+**Found:** 2026-05-22 (Shane: "whichever input I select I keep getting [the error]")
+**Location:** [src/audio/AudioWorker.cpp](src/audio/AudioWorker.cpp) — `start()`, the `move-source-output` polling loop
+**Severity:** high (BUG-013's fix didn't actually work — the polling loop always failed, falling back to "capture from system default input" which on this machine is the mic)
+**Description.** The BUG-013 patch identified our PortAudio source-output by matching `application.process.id = "<pid>"` against `pactl list source-outputs`. Diagnostic capture of the actual fields produced by the ALSA `pcm.pipewire` plugin showed that property is **never set**:
+
+  ```text
+  Properties:
+      application.name = "PipeWire ALSA [aplay]"
+      node.name = "alsa_capture.aplay"
+      device.description = "ALSA Capture [aplay]"
+      ...
+      module-stream-restore.id = "source-output-by-application-name:PipeWire ALSA [aplay]"
+  ```
+
+  No `application.process.id`, no `application.process.binary` — `pcm.pipewire` populates only the ALSA-plugin-facing properties. Matching on PID never found our entry, the 1 s timeout expired every time, the error dialog fired, and the stream continued capturing from the system mic.
+**Reproduction.** Phase-3-polish build (`2fdc659` + BUG-013 patch but pre-fix): launch Scintilla, pick any `[system audio]` monitor, start a reactive mode, speak into the laptop mic — the visualisation reacts to the mic, and the "Couldn't find Scintilla's source-output" dialog appears.
+**Notes.** Switched the matcher from PID to `application.name` substring `[Scintilla]`. The `pcm.pipewire` plugin always writes the binary's name into `PipeWire ALSA [<binary>]`, and our executable is named `Scintilla` (per `add_executable(Scintilla ...)` in CMakeLists). Same change also bumps the poll timeout from 1 s (20 × 50 ms) to 3 s (60 × 50 ms) because PortAudio's first source-output registration is noticeably slower than aplay's. If the matcher ever needs to widen again, `node.name` substring `Scintilla` is a reliable second-best.
+
+### BUG-013: System-audio routing via `pactl set-default-source` was wrong scope on PipeWire
+
+**Status:** fixed (2026-05-22, this session)
+**Found:** 2026-05-22 (Shane consulted Claude-web after observing mic + monitor bleed in every input pick; diagnostic commands run from this session confirmed the architectural mismatch)
+**Location:** [src/audio/AudioWorker.cpp](src/audio/AudioWorker.cpp) `start()`, plus the now-deleted [src/audio/AudioRouting.{h,cpp}](src/audio/AudioRouting.h)
+**Severity:** high (the headline Phase 3 feature — system-audio capture — wasn't doing what the user expected, and the workaround mutated global system state with crash-handler complexity to justify it)
+**Description.** The Phase 3 polish commit (`2fdc659`) introduced `AudioRouting::setDefaultSource` which redirected audio capture by running `pactl set-default-source <monitor>` before opening PortAudio's `default` device. On this PipeWire system (Ubuntu, server "PulseAudio (on PipeWire 1.0.5)"), three things broke that approach:
+
+  1. `pcm.!default` is `type pipewire` (the PipeWire-native ALSA plugin), not `pcm.pulse` — capture bypasses libpulse entirely. Diagnostic test: `PULSE_SOURCE="<monitor>" arecord -D default ...` produced a source-output bound to **Source 62 (the mic)**, not the requested monitor.
+  2. The PipeWire `pcm.pipewire` plugin's auto-routing (`capture_node = "-1"` per `/usr/share/alsa/alsa.conf.d/50-pipewire.conf`) doesn't reliably observe a default-source change for an in-progress connection.
+  3. Even when it did land, the change persisted system-wide until the user manually reverted — which is what motivated the (now-also-unnecessary) audio-restore hook in `CrashHandler`.
+
+**Reproduction.** On Ubuntu/PipeWire pre-fix: Audio → pick a `[system audio]` monitor → click any reactive mode → play music → `pactl list source-outputs` shows the `Source:` field as the system mic, not the monitor. Audio capture is whatever the user's mic happens to pick up, plus any system audio the mic acoustically catches.
+**Notes.** Replaced with **per-stream `pactl move-source-output`** after `Pa_StartStream`: the worker polls `pactl list source-outputs` looking for an entry matching its own PID, then issues `pactl move-source-output <id> <monitor>` to redirect just that one stream. Verified per Test 2 in the diagnostic run — moving arecord's source-output from Source 62 (mic) to Source 57 (monitor) worked cleanly. No global state changed; no cleanup needed on stop or crash. `AudioRouting.{h,cpp}` deleted entirely (IMP-009). The `CrashHandler` itself stays (still useful for stack traces) but the audio-restore hook is removed. Pre-move data in the ring buffer is discarded so the visualisation starts cleanly on the monitor.
+
 ### BUG-012: WaveformSlice mode lacked time history (DEC-012 "map one axis to time")
 
 **Status:** fixed (2026-05-21, this session)
