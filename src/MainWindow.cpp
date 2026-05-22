@@ -257,12 +257,16 @@ void MainWindow::wireSignals() {
             this, &MainWindow::onReactiveFrameCaptured);
     connect(m_audioEngine.get(), &AudioReactiveEngine::errorOccurred,
             this, &MainWindow::onAudioError);
+    connect(m_audioEngine.get(), &AudioReactiveEngine::bandsReadyForPreset,
+            this, &MainWindow::onReactivePresetBands);
 
     // Audio reactive dock → engine lifecycle handled here.
     connect(m_audioPanel, &AudioReactivePanel::modeChanged,
             this, &MainWindow::onReactiveModeChanged);
     connect(m_audioPanel, &AudioReactivePanel::blendChanged,
             this, &MainWindow::onReactiveBlendChanged);
+    connect(m_audioPanel, &AudioReactivePanel::presetLoadRequested,
+            this, &MainWindow::onLoadReactivePreset);
 }
 
 // ── Slots ────────────────────────────────────────────────────────────────────
@@ -393,6 +397,13 @@ void MainWindow::applyMask(std::shared_ptr<ShapeMask> mask) {
     if (m_timeline) {
         m_audioEngine->setBaseFrame(m_timeline->currentFrame());
     }
+    // Keep the running preset (if any) in sync with the cube geometry; the
+    // runner re-sends "load" so the preset's on_load sees the new mask.
+    if (m_presetRunner) {
+        m_presetRunner->setCubeMeta(m_mask->gridSize(),
+                                    QString::fromStdString(shapeTypeName(m_mask->shape())),
+                                    m_mask->count());
+    }
 }
 
 bool MainWindow::confirmDiscardIfDirty(const QString& reason) {
@@ -517,17 +528,7 @@ void MainWindow::onRunPreset() {
         return;
     }
 
-    // Construct the runner lazily; reuse across calls.
-    if (!m_presetRunner) {
-        m_presetRunner = std::make_unique<PresetRunner>(this);
-        connect(m_presetRunner.get(), &PresetRunner::frameReady,
-                this, &MainWindow::onPresetFrameReady);
-        connect(m_presetRunner.get(), &PresetRunner::presetLoaded,
-                this, &MainWindow::onPresetLoaded);
-        connect(m_presetRunner.get(), &PresetRunner::errorOccurred,
-                this, &MainWindow::onPresetError);
-    }
-
+    ensurePresetRunner();
     m_presetRunner->setCubeMeta(m_mask->gridSize(),
                                 QString::fromStdString(shapeTypeName(m_mask->shape())),
                                 m_mask->count());
@@ -597,21 +598,88 @@ void MainWindow::tickPresetPlayback() {
 }
 
 void MainWindow::onPresetFrameReady(VoxelFrame f) {
-    if (m_presetFramesReceived == 0) {
-        // First frame replaces the (already-cleared) initial frame so the
-        // timeline starts at frame 1 with content, not an empty frame + new.
-        m_timeline->currentFrame() = std::move(f);
-        m_timeline->notifyCurrentFrameEdited();
-    } else {
+    // Discriminator: offline playback drives a QTimer; live reactive mode
+    // does not. The runner is shared between the two paths.
+    const bool offline = m_presetPlaybackTimer && m_presetPlaybackTimer->isActive();
+
+    if (offline) {
+        if (m_presetFramesReceived == 0) {
+            // First frame replaces the (already-cleared) initial frame so the
+            // timeline starts at frame 1 with content, not an empty frame + new.
+            m_timeline->currentFrame() = std::move(f);
+            m_timeline->notifyCurrentFrameEdited();
+        } else {
+            m_timeline->addFrame();
+            m_timeline->currentFrame() = std::move(f);
+            m_timeline->notifyCurrentFrameEdited();
+        }
+        ++m_presetFramesReceived;
+        return;
+    }
+
+    // Live reactive mode: drive the viewport's reactive overlay, and if the
+    // capture toggle is on, append to the timeline the same way the built-in
+    // modes do (mirrors onReactiveFrameCaptured's 500-frame soft cap).
+    m_viewport->setReactiveFrame(f);
+    if (m_captureAction && m_captureAction->isChecked() && m_timeline) {
+        if (m_timeline->frameCount() >= 500) {
+            m_captureAction->setChecked(false);
+            statusBar()->showMessage(
+                tr("Capture stopped — timeline reached the 500-frame soft cap."), 5000);
+            return;
+        }
         m_timeline->addFrame();
         m_timeline->currentFrame() = std::move(f);
         m_timeline->notifyCurrentFrameEdited();
     }
-    ++m_presetFramesReceived;
 }
 
 void MainWindow::onPresetLoaded(const QString& name) {
     statusBar()->showMessage(tr("Preset loaded: %1").arg(name), 3000);
+    if (m_audioPanel) m_audioPanel->setPresetStatus(name);
+}
+
+// Construct the PresetRunner the first time it's needed and wire its signals.
+// Both the offline File→Run preset path and the live reactive mode share the
+// same runner instance.
+void MainWindow::ensurePresetRunner() {
+    if (m_presetRunner) return;
+    m_presetRunner = std::make_unique<PresetRunner>(this);
+    connect(m_presetRunner.get(), &PresetRunner::frameReady,
+            this, &MainWindow::onPresetFrameReady);
+    connect(m_presetRunner.get(), &PresetRunner::presetLoaded,
+            this, &MainWindow::onPresetLoaded);
+    connect(m_presetRunner.get(), &PresetRunner::errorOccurred,
+            this, &MainWindow::onPresetError);
+    connect(m_presetRunner.get(), &PresetRunner::presetUnloaded,
+            this, [this]() {
+                if (m_audioPanel) m_audioPanel->setPresetStatus(QString());
+            });
+}
+
+// ── Preset scripting (Phase 4 step C — live reactive mode) ───────────────────
+
+void MainWindow::onLoadReactivePreset() {
+    const QString defaultDir = QDir(QCoreApplication::applicationDirPath())
+                                   .absoluteFilePath(QStringLiteral("../presets"));
+    const QString path = QFileDialog::getOpenFileName(
+        this, tr("Load reactive preset"), defaultDir,
+        tr("Python presets (*.py)"));
+    if (path.isEmpty()) return;
+
+    ensurePresetRunner();
+    m_presetRunner->setCubeMeta(m_mask->gridSize(),
+                                QString::fromStdString(shapeTypeName(m_mask->shape())),
+                                m_mask->count());
+    m_presetRunner->loadPreset(path);
+}
+
+void MainWindow::onReactivePresetBands(BandData d) {
+    // The engine emits this only when mode == PythonPreset. If no preset
+    // has been loaded yet, skip silently — the user will see "(no preset
+    // loaded)" in the panel and can click Load preset… at any time.
+    if (!m_presetRunner || !m_presetRunner->isLoaded()) return;
+    m_presetRunner->pushFrame(d);
 }
 
 void MainWindow::onPresetError(const QString& msg, int line) {

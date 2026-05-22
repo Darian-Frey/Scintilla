@@ -308,6 +308,12 @@ void AudioReactiveEngine::onBands(BandData data) {
         case ReactiveMode::RadialEq:       frame = modeRadialEq(data);       break;
         case ReactiveMode::Tunnel:         frame = modeTunnel(data);         break;
         case ReactiveMode::EnergyFloor:    frame = modeEnergyFloor(data);    break;
+        case ReactiveMode::PythonPreset:
+            // Engine doesn't render in this mode; PresetRunner does. Forward
+            // the band data and emit the beat ping for any UI hooked into it.
+            emit bandsReadyForPreset(data);
+            if (data.beat) emit beatDetected();
+            return;
         case ReactiveMode::Off:            return;
     }
 

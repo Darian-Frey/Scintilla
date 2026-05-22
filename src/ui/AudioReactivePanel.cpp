@@ -5,6 +5,7 @@
 #include <QGroupBox>
 #include <QHBoxLayout>
 #include <QLabel>
+#include <QPushButton>
 #include <QSlider>
 #include <QSpinBox>
 #include <QVBoxLayout>
@@ -47,6 +48,7 @@ void AudioReactivePanel::buildLayout() {
     m_modeCombo->addItem(tr("Radial EQ"),       static_cast<int>(ReactiveMode::RadialEq));
     m_modeCombo->addItem(tr("Tunnel"),          static_cast<int>(ReactiveMode::Tunnel));
     m_modeCombo->addItem(tr("Energy floor"),    static_cast<int>(ReactiveMode::EnergyFloor));
+    m_modeCombo->addItem(tr("Python preset"),   static_cast<int>(ReactiveMode::PythonPreset));
     modeForm->addRow(tr("Reactive:"), m_modeCombo);
     connect(m_modeCombo, qOverload<int>(&QComboBox::currentIndexChanged),
             this, &AudioReactivePanel::onModeIndex);
@@ -125,6 +127,25 @@ void AudioReactivePanel::buildLayout() {
     root->addWidget(m_waveformGroup);
     m_waveformGroup->setEnabled(false);   // only when Waveform mode is active
 
+    // ── Python preset group ─────────────────────────────────────────────────
+    m_presetGroup = new QGroupBox(tr("Python preset"), this);
+    auto* presetLayout = new QVBoxLayout(m_presetGroup);
+
+    m_presetLoadButton = new QPushButton(tr("Load preset…"), m_presetGroup);
+    m_presetLoadButton->setToolTip(
+        tr("Pick a .py file. The preset receives live audio bands and produces "
+           "voxel frames via a Python subprocess."));
+    connect(m_presetLoadButton, &QPushButton::clicked,
+            this, [this]() { emit presetLoadRequested(); });
+    presetLayout->addWidget(m_presetLoadButton);
+
+    m_presetStatusLabel = new QLabel(tr("(no preset loaded)"), m_presetGroup);
+    m_presetStatusLabel->setWordWrap(true);
+    presetLayout->addWidget(m_presetStatusLabel);
+
+    root->addWidget(m_presetGroup);
+    m_presetGroup->setEnabled(false);     // only when Python preset mode is active
+
     root->addStretch(1);
 
     // Push initial tuning values into the engine so the displayed numbers
@@ -141,7 +162,15 @@ void AudioReactivePanel::buildLayout() {
 void AudioReactivePanel::onModeIndex(int idx) {
     const auto mode = static_cast<ReactiveMode>(m_modeCombo->itemData(idx).toInt());
     if (m_waveformGroup) m_waveformGroup->setEnabled(mode == ReactiveMode::WaveformSlice);
+    if (m_presetGroup)   m_presetGroup  ->setEnabled(mode == ReactiveMode::PythonPreset);
     emit modeChanged(mode);
+}
+
+void AudioReactivePanel::setPresetStatus(const QString& name) {
+    if (!m_presetStatusLabel) return;
+    m_presetStatusLabel->setText(name.isEmpty()
+        ? tr("(no preset loaded)")
+        : tr("Loaded: %1").arg(name));
 }
 
 void AudioReactivePanel::onBlendIndex(int idx) {

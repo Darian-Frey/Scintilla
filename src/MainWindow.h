@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <memory>
 
+#include "audio/FFTProcessor.h"   // for BandData (used in onReactivePresetBands slot)
 #include "core/AnimationTimeline.h"
 #include "core/ShapeMask.h"
 
@@ -78,6 +79,10 @@ private slots:
     void onPresetError(const QString& msg, int line);
     void tickPresetPlayback();
 
+    // ── Preset scripting (Phase 4 step C — live reactive mode) ───────────────
+    void onLoadReactivePreset();           // panel "Load preset…" button
+    void onReactivePresetBands(BandData d);// engine → runner per-frame routing
+
 private:
     void buildMenus();
     void buildToolbar();
@@ -88,6 +93,7 @@ private:
     void applyMask(std::shared_ptr<ShapeMask> mask);   // propagate to all consumers (BUG-011)
     bool confirmDiscardIfDirty(const QString& reason);
     bool saveTo(const QString& path);
+    void ensurePresetRunner();   // lazy-construct + wire signals on first use
 
     CubeViewport*                       m_viewport       = nullptr;
     ColorPickerWidget*                  m_colorPicker    = nullptr;

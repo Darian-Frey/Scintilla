@@ -19,6 +19,7 @@ enum class ReactiveMode {
     RadialEq,        // bands → concentric shells from cube centre outward
     Tunnel,          // current spectrum at Z=n-1; past frames recede to Z=0
     EnergyFloor,     // RMS-driven wall rises from Y=0; X axis coloured by band
+    PythonPreset,    // user-provided Python preset drives the frame (Phase 4 step C)
 };
 
 enum class ReactiveBlend {
@@ -126,6 +127,11 @@ signals:
     void frameCaptured(VoxelFrame frame);   // connect to MainWindow for timeline append
     void beatDetected();                    // connect to any beat-flash UI
     void errorOccurred(QString message);
+
+    // Emitted only when mode == PythonPreset. The engine does not render the
+    // frame itself in this mode; the band data is forwarded so MainWindow can
+    // push it into the PresetRunner subprocess (Phase 4 step C).
+    void bandsReadyForPreset(BandData data);
 
 private:
     // ── Mode implementations (each returns a VoxelFrame) ─────────────────────

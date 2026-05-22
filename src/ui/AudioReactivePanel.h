@@ -9,6 +9,7 @@ class QSlider;
 class QSpinBox;
 class QLabel;
 class QGroupBox;
+class QPushButton;
 
 // ── AudioReactivePanel ──────────────────────────────────────────────────────
 //
@@ -36,11 +37,19 @@ class AudioReactivePanel : public QWidget {
 public:
     explicit AudioReactivePanel(AudioReactiveEngine* engine, QWidget* parent = nullptr);
 
+    // Push the currently-loaded preset name into the status label.
+    // Pass an empty string to show "(no preset loaded)".
+    void setPresetStatus(const QString& name);
+
 signals:
     // MainWindow connects to this so it can drive the device-pick / start /
     // stop / capture-action lifecycle without the panel knowing about them.
     void modeChanged(ReactiveMode mode);
     void blendChanged(ReactiveBlend blend);
+
+    // Fired when the user clicks "Load preset…" in the Python preset group.
+    // MainWindow opens the file dialog and routes to PresetRunner.
+    void presetLoadRequested();
 
 private slots:
     void onModeIndex(int);
@@ -69,4 +78,8 @@ private:
 
     QGroupBox*  m_waveformGroup = nullptr;
     QSpinBox*   m_speedSpin     = nullptr;
+
+    QGroupBox*    m_presetGroup       = nullptr;
+    QPushButton*  m_presetLoadButton  = nullptr;
+    QLabel*       m_presetStatusLabel = nullptr;
 };
