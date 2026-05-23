@@ -2,6 +2,13 @@
 Rainbow cycle — a hue wave sweeps along the cube diagonal. Volume
 modulates wave speed; beats add momentum to the cycle so the wave
 visibly accelerates with the music's drive.
+
+Edit guide
+----------
+  proj * 40.0         — stripe density along the diagonal.
+  18.0 + bass*30      — phase jump per beat in on_beat.
+  1.5 + vol*4.0       — per-frame phase advance.
+  brightness floor    — 0.45 keeps it visible during silence.
 """
 from led_cube import Preset
 import numpy as np

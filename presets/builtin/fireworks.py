@@ -2,6 +2,15 @@
 Fireworks — every beat detonates a fresh shower of sparks at a random
 spawn point. Sparks are tracked individually with simple gravity and
 drag so the showers look like real ballistic debris.
+
+Edit guide
+----------
+  n (sparks)          — 16 + bass*32 per detonation in on_beat.
+  speed               — initial spark velocity; lower = tighter explosions.
+  gravity (-0.04)     — pulls sparks down; raise magnitude for heavier debris.
+  drag (0.93)         — air resistance per frame.
+  life *= 0.90        — how long sparks burn before culling.
+  self.val *= 0.7     — fade rate of the visual trail.
 """
 from led_cube import Preset
 import numpy as np

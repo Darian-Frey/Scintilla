@@ -2,6 +2,13 @@
 Snake — a single coloured snake winds through the cube, turning on
 beats. The body is a fading tail of fixed length. Volume nudges the
 snake's speed; treble bumps the turning probability between beats.
+
+Edit guide
+----------
+  tail_len            — max(20, s*s) by default; lower for a stubbier snake.
+  speed               — 0.35 + vol*0.7 advances per frame.
+  turn chance         — 0.05 + treb*0.15 between beats.
+  hue step on turn    — 30.0 + bass*60.0 per direction change.
 """
 from led_cube import Preset
 import numpy as np

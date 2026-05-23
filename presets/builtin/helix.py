@@ -1,6 +1,14 @@
 """
 Helix — twin DNA-style strands spiralling up the cube. Rotation rate
 follows audio volume; treble bumps the spread between the two strands.
+
+Edit guide
+----------
+  twist (0.6)         — turns per cube height; larger = tighter coil.
+  global_t mult       — 1.2 + vol*2.2 sets rotation speed.
+  spread              — 0.32 * s * (0.6 + treb*0.7) controls helix radius.
+  brush               — 0.7 + bass*0.5 controls line thickness.
+  hue gradient        — y*(360/s) gives banded candy-cane colours.
 """
 from led_cube import Preset
 import numpy as np

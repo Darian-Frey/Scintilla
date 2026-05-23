@@ -2,6 +2,14 @@
 Galaxy — slowly rotating spiral arms in the XZ plane. The arms sit at
 the cube's vertical mid-band but drift up and down with volume so the
 disc breathes a little.
+
+Edit guide
+----------
+  arms (3)            — number of spiral arms.
+  twist               — 0.9 + bass*0.3; larger = tighter spiral.
+  disc_thick          — vertical thickness of the disc.
+  radial 0.55, 10.0   — peak ring radius (0.55) and falloff sharpness (10.0).
+  hue formula         — 220 - r/max_r*220 puts blue outer, red core.
 """
 from led_cube import Preset
 import numpy as np

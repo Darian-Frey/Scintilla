@@ -1,6 +1,13 @@
 """
 Ripple — concentric waves expand from the cube centre on every beat.
 Multiple ripples coexist; each fades as it expands beyond the cube radius.
+
+Edit guide
+----------
+  speed               — wave expansion rate (raise for faster sweep).
+  shell_width         — ring thickness in voxel units.
+  centroid * 320      — hue mapping in on_beat; swap for a different palette.
+  max_r + 1.5         — how far past the cube edge ripples live before culling.
 """
 from led_cube import Preset
 import numpy as np

@@ -2,6 +2,13 @@
 VU meter — frequency bands drive vertical columns climbing from Y=0.
 Classic EQ rig. Hue runs green → yellow → red the higher each column
 reaches, mimicking the analog VU meter aesthetic.
+
+Edit guide
+----------
+  self.peaks * 0.94   — peak-hold decay; closer to 1.0 = head lingers longer.
+  h gradient (110.0)  — green-to-red span; try 60 for a pure red-yellow ramp.
+  peak head           — currently white (sat=0); set hue/sat for a coloured head.
+  bands[gc[:,0]]*0.35 — column brightness vs band strength.
 """
 from led_cube import Preset
 import numpy as np

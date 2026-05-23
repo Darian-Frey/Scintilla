@@ -2,6 +2,14 @@
 Fire — flames rising from Y=0. Cellular-automaton style: each cell's
 heat is the average of the cells immediately below it, slightly cooled
 each step. Bass kicks fan the flames; treble adds sparks at the top.
+
+Edit guide
+----------
+  floor_intensity     — heat seeded at the bottom row; higher = taller flames.
+  cooled (0.86)       — cooling per step; lower = shorter, snappier flames.
+  treb sparks         — change the 0.4 threshold to make sparks more/less frequent.
+  hue formula (60*v)  — colour gradient; 40*v gives a redder flame.
+  sat formula         — 1.5 - v*1.4 controls how white the hottest cells go.
 """
 from led_cube import Preset
 import numpy as np

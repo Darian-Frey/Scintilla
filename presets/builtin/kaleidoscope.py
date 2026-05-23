@@ -2,6 +2,13 @@
 Kaleidoscope — mirrored radial pattern that rotates. The pattern is the
 sum of a few rotating petals seen from the cube centre; audio rotates,
 beats refresh the pattern's phase.
+
+Edit guide
+----------
+  petals              — 6 + int(centroid*4); raise the base for more arms.
+  rotation speed      — audio.time * (0.4 + vol*1.0).
+  beat phase step     — 0.6 + bass*0.7 in on_beat.
+  hue formula         — theta-based; drop the time*20 term for a fixed palette.
 """
 from led_cube import Preset
 import numpy as np

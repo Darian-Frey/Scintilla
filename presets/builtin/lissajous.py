@@ -1,6 +1,15 @@
 """
 Lissajous — 3D parametric Lissajous figure with fading trails.
 Bass/mid/treb drive the three frequency ratios a:b:c.
+
+Edit guide
+----------
+  a, b, c           — frequency ratios in on_frame(). Small integers give
+                      closed curves; try (4, 3, 2) for a tighter figure.
+  r = cube.size*0.44 — overall curve size; lower shrinks toward the centre.
+  brush             — line thickness; lower = thinner stroke.
+  decay (0.87)      — trail length; raise toward 1.0 for longer ghosts.
+  pos_hue mult (8.0) — hue variation along the curve.
 """
 from led_cube import Preset
 import numpy as np

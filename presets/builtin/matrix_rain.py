@@ -2,6 +2,14 @@
 Matrix rain — vertical green streams falling through the cube. Each
 column has its own head position and tail length; new columns spawn at
 random Y on beats so the rain keeps feeling fresh.
+
+Edit guide
+----------
+  n (spawn per beat)  — 2 + bass*6 columns per beat.
+  spontaneous spawn   — 0.08 + vol*0.2 chance per frame even without a beat.
+  fade (0.78)         — trail length; closer to 1.0 = longer tails.
+  fall speed          — 0.45 + vol*0.5.
+  hue 120.0           — green default; try 0 (red) for a hellfire variant.
 """
 from led_cube import Preset
 import numpy as np

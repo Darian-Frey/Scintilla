@@ -2,6 +2,13 @@
 Plasma — animated 3D plasma field. Volume modulates the colour cycle
 speed and centroid biases the hue offset, but the visual is hypnotic
 enough to be enjoyable in silence too.
+
+Edit guide
+----------
+  self.scale          — pattern density; larger value = more cells visible.
+  sine multipliers    — (1.3, 1.7, 2.0, 1.8) control how independent the axes feel.
+  hue formula         — field*280 + centroid*90; change ranges for different palettes.
+  val floor (0.4)     — minimum brightness; 0 makes troughs go black.
 """
 from led_cube import Preset
 import numpy as np

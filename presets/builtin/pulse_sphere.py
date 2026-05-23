@@ -1,5 +1,13 @@
 """
 Pulse Sphere — shell expands from centre on bass hit, fades to nothing.
+
+Edit guide
+----------
+  velocity init       — shell launch speed in on_beat; raise for snappier expansion.
+  damping (0.83)      — how quickly the shell decelerates.
+  shell_width         — thickness of the glowing ring.
+  hue formula         — uses centroid; replace with audio.bass*240 for warm
+                        bass / cool treble swap.
 """
 from led_cube import Preset
 import numpy as np

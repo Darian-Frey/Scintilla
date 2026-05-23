@@ -2,6 +2,13 @@
 Breathing — slow ambient hue cycle with a gentle pulse synced to audio
 energy. The whole cube acts as a single soft light, like a smart bulb
 breathing in time with the music.
+
+Edit guide
+----------
+  a (0.08)            — volume smoothing; lower = slower breath response.
+  audio.time * 0.6    — natural breath frequency (~10s cycle); raise for faster.
+  brightness terms    — 0.25 floor + breath*0.5 + smoothed_vol*0.5.
+  hue formula         — time*8 + centroid*60 controls colour drift speed.
 """
 from led_cube import Preset
 import numpy as np

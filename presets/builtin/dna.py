@@ -2,6 +2,14 @@
 DNA — twin spiral strands plus connecting rungs every few rows. Behaves
 like Helix but with explicit cross-strands so it reads as a double-helix
 ladder rather than a free twin spiral.
+
+Edit guide
+----------
+  twist (0.55)        — coil tightness.
+  spread (s*0.32)     — distance between the two strands.
+  rung_y modulo (2)   — rung row spacing; raise to 3 or 4 for sparser rungs.
+  h_strand1, h_strand2,
+  h_rung              — the three palette hues; swap freely for new colour schemes.
 """
 from led_cube import Preset
 import numpy as np

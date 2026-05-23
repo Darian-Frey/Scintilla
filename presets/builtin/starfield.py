@@ -2,6 +2,14 @@
 Starfield — drifting stars across the cube. The viewer's apparent motion
 warps with audio: volume accelerates forward drift, treble jitters the
 sideways course slightly, beats refresh stars at the far plane.
+
+Edit guide
+----------
+  n (star count)      — max(32, size*size); raise for a denser sky.
+  speed               — 0.10 + audio.vol * 0.45 forward drift rate.
+  jitter              — audio.treb * 0.05 sideways noise.
+  hue 200.0           — base palette; try 280 for a violet sky.
+  sat 0.4             — lower for pure white stars, higher for saturated colour.
 """
 from led_cube import Preset
 import numpy as np

@@ -2,6 +2,14 @@
 Bouncing ball — a single ball with simple physics caroms around the
 cube. Beats kick it sideways; volume bumps the ball's brightness. Walls
 are perfectly elastic so it never stops.
+
+Edit guide
+----------
+  initial vel         — np.array([0.35, 0.45, 0.30]) sets opening trajectory.
+  kick magnitude      — 0.25 + bass*0.5 in on_beat.
+  damping (0.995)     — global drag; lower = ball slows faster between kicks.
+  glow                — 1.0 + bass*0.6 controls the visual ball size.
+  self.val *= 0.7     — tail fade rate.
 """
 from led_cube import Preset
 import numpy as np

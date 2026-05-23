@@ -3,9 +3,15 @@ Strobe — full-cube flash on every beat, hue rotating each hit. Fades
 between beats so silent stretches dim out instead of strobing dark.
 Best on tracks with strong onsets — washes out into a hue cycler on
 soft material.
+
+Edit guide
+----------
+  decay (0.65)        — how fast the flash dims between beats.
+  audio.vol * 0.15    — ambient floor so silence isn't pitch black.
+  hue step (47.0)     — colour jump per beat; primes give a nice non-repeating
+                        rotation.
 """
 from led_cube import Preset
-import numpy as np
 
 
 class Strobe(Preset):

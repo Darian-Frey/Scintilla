@@ -2,6 +2,13 @@
 Rain — falling particles. Bass spawns more drops; the spectral centroid
 picks the hue, so a bright snare sounds pastel while a bass thump sounds
 saturated and warm.
+
+Edit guide
+----------
+  n (drops per beat)  — 4 + bass*14 in on_beat; raise for denser rain.
+  fall speed          — 0.22 + audio.vol * 0.35 in on_frame.
+  self.val *= 0.78    — trail length; closer to 1.0 = longer streaks.
+  hue formula         — centroid*280 + 40; tweak for a different palette.
 """
 from led_cube import Preset
 import numpy as np

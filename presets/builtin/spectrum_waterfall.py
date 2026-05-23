@@ -2,6 +2,13 @@
 Spectrum waterfall — frequency-band history scrolling along Z. The
 freshest spectrum sits at Z = size-1; each frame the slice shifts one
 step toward Z = 0. Looks like a 3D EQ history display.
+
+Edit guide
+----------
+  hue gradient        — 230.0 - x*(230.0/(s-1)); change 230 for the colour range.
+  brightness floor    — 0.4 + vals*0.7; lower the floor to make quiet bands disappear.
+  col_heights         — vals*(s-1); replace with a non-linear curve for taller
+                        responses to small bands.
 """
 from led_cube import Preset
 import numpy as np
