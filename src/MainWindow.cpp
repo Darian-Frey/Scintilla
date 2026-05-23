@@ -16,6 +16,9 @@
 #include <QAction>
 #include <QActionGroup>
 #include <QApplication>
+#include <QImage>
+#include <QProgressDialog>
+#include <QStandardPaths>
 #include <QUndoStack>
 #include <QDockWidget>
 #include <QFileDialog>
@@ -35,6 +38,48 @@ namespace {
     constexpr int kDefaultGrid = 8;
     constexpr int kWindowW     = 1480;
     constexpr int kWindowH     = 860;
+
+    // ── Camera-keyframe interpolation helpers ────────────────────────────────
+    //
+    // Theta wraps modulo 2π — pick the shorter angular direction so a 350°→10°
+    // sweep doesn't blow through every angle in between. Phi/radius/target
+    // are simple linear lerps.
+
+    constexpr float kPi    = 3.14159265358979323846f;
+    constexpr float kTwoPi = 2.0f * kPi;
+
+    float lerpAngle(float a, float b, float t) {
+        float d = std::fmod((b - a) + kPi, kTwoPi);
+        if (d < 0) d += kTwoPi;
+        d -= kPi;
+        return a + d * t;
+    }
+
+    CameraKeyframe interpolateKeyframe(
+        const std::map<int, CameraKeyframe>& keys, int frame) {
+
+        if (keys.empty()) return {};
+        auto next = keys.lower_bound(frame);
+        if (next == keys.end())       return std::prev(next)->second;   // past last
+        if (next->first == frame)      return next->second;              // exact hit
+        if (next == keys.begin())     return next->second;              // before first
+        auto prev = std::prev(next);
+        const float t =
+            float(frame - prev->first) / float(next->first - prev->first);
+        CameraKeyframe out;
+        out.theta  = lerpAngle(prev->second.theta, next->second.theta, t);
+        out.phi    = std::lerp(prev->second.phi,    next->second.phi,    t);
+        out.radius = std::lerp(prev->second.radius, next->second.radius, t);
+        out.target = prev->second.target * (1.0f - t) + next->second.target * t;
+        return out;
+    }
+
+    void applyKeyframe(OrbitCamera& cam, const CameraKeyframe& k) {
+        cam.setTheta (k.theta);
+        cam.setPhi   (k.phi);
+        cam.setRadius(k.radius);
+        cam.setTarget(k.target);
+    }
 }
 
 // ── Construction ─────────────────────────────────────────────────────────────
@@ -162,6 +207,7 @@ void MainWindow::buildMenus() {
     file->addAction(tr("Save &As…"),  QKeySequence::SaveAs, this, &MainWindow::onSaveAs);
     file->addSeparator();
     file->addAction(tr("&Run preset…"), this, &MainWindow::onRunPreset);
+    file->addAction(tr("&Export animation…"), this, &MainWindow::onExportAnimation);
     file->addSeparator();
     file->addAction(tr("E&xit"),      QKeySequence::Quit,   qApp, &QApplication::quit);
 
@@ -173,6 +219,9 @@ void MainWindow::buildMenus() {
     auto* redoAct = m_undoStack->createRedoAction(this, tr("&Redo"));
     redoAct->setShortcut(QKeySequence::Redo);
     edit->addAction(redoAct);
+    edit->addSeparator();
+    edit->addAction(tr("&Copy"),  QKeySequence::Copy,  this, &MainWindow::onCopy);
+    edit->addAction(tr("&Paste"), QKeySequence::Paste, this, &MainWindow::onPaste);
 
     // ─── View ────────────────────────────────────────────────────────────────
     auto* view = mbar->addMenu(tr("&View"));
@@ -189,6 +238,14 @@ void MainWindow::buildMenus() {
     add_toggle(tr("A&uto-rotate"),           false, &MainWindow::onToggleAutoRotate);
     view->addSeparator();
     view->addAction(tr("&Reset camera"), QKeySequence(Qt::Key_R), this, &MainWindow::onResetCamera);
+    view->addSeparator();
+    view->addAction(tr("&Set camera keyframe"),
+                    QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_K),
+                    this, &MainWindow::onSetCameraKeyframe);
+    view->addAction(tr("C&lear camera keyframe"),
+                    this, &MainWindow::onClearCameraKeyframe);
+    view->addAction(tr("Clear &all camera keyframes"),
+                    this, &MainWindow::onClearAllCameraKeyframes);
 
     // ─── Shape ───────────────────────────────────────────────────────────────
     auto* shape = mbar->addMenu(tr("&Shape"));
@@ -256,6 +313,29 @@ void MainWindow::buildToolbar() {
         m_viewport->setTool(static_cast<Tool>(a->data().toInt()));
         statusBar()->showMessage(tr("Tool: %1").arg(a->text()), 1500);
     });
+
+    // Mirror toggles — duplicate each Paint/Erase stroke across the cube's
+    // X/Y/Z midplanes. All three combine (up to 8x mirroring).
+    bar->addSeparator();
+    auto add_mirror = [&](const QString& text, const QString& tip,
+                          void (CubeViewport::*setter)(bool)) {
+        auto* a = bar->addAction(text);
+        a->setCheckable(true);
+        a->setToolTip(tip);
+        connect(a, &QAction::toggled, this, [this, setter](bool on) {
+            (m_viewport->*setter)(on);
+        });
+    };
+    add_mirror(tr("Mirror X"),
+               tr("Mirror each stroke across the X midplane."),
+               &CubeViewport::setMirrorX);
+    add_mirror(tr("Mirror Y"),
+               tr("Mirror each stroke across the Y midplane."),
+               &CubeViewport::setMirrorY);
+    add_mirror(tr("Mirror Z"),
+               tr("Mirror each stroke across the Z midplane."),
+               &CubeViewport::setMirrorZ);
+
     // Audio reactive controls live in their own dock (AudioReactivePanel),
     // not the toolbar — see buildDocks().
 }
@@ -272,9 +352,17 @@ void MainWindow::wireSignals() {
 
     // Adding/deleting/replacing frames invalidates any pending undo records
     // (their saved frameIndex may now point at a different frame or none).
-    // Cheapest fix is to drop history on any structural change.
+    // Camera keyframes are indexed by frame too, so drop them as well.
     connect(m_timeline.get(), &AnimationTimeline::timelineStructureChanged,
-            this, [this]() { if (m_undoStack) m_undoStack->clear(); });
+            this, [this]() {
+                if (m_undoStack) m_undoStack->clear();
+                m_cameraKeyframes.clear();
+            });
+
+    // During playback, drive the camera from the keyframe sequence so the
+    // user can author fly-throughs without scripting them by hand.
+    connect(m_timeline.get(), &AnimationTimeline::currentFrameChanged,
+            this, &MainWindow::onPlaybackCameraTick);
 
     connect(m_colorPicker, &ColorPickerWidget::colorChanged,
             this, &MainWindow::onColorChanged);
@@ -322,12 +410,298 @@ void MainWindow::onStrokeCommitted(VoxelStroke stroke) {
     m_undoStack->push(new VoxelStrokeCommand(m_timeline.get(), std::move(stroke)));
 }
 
+void MainWindow::onCopy() {
+    if (!m_timeline) return;
+    const VoxelFrame& src = m_timeline->currentFrame();
+
+    m_clipboard = VoxelFrame{};
+    int copied = 0;
+    for (const auto& [k, c] : src.voxels()) {
+        // Slice acts as the selection: skip voxels outside any active slice.
+        if (m_sliceX >= 0 && k.x != m_sliceX) continue;
+        if (m_sliceY >= 0 && k.y != m_sliceY) continue;
+        if (m_sliceZ >= 0 && k.z != m_sliceZ) continue;
+        m_clipboard.set(k.x, k.y, k.z, c[0], c[1], c[2]);
+        ++copied;
+    }
+    m_clipboardHasContent = (copied > 0);
+    statusBar()->showMessage(
+        copied > 0 ? tr("Copied %1 voxels.").arg(copied)
+                   : tr("Nothing to copy (no lit voxels in selection)."),
+        2500);
+}
+
+void MainWindow::onPaste() {
+    if (!m_timeline || !m_clipboardHasContent) {
+        statusBar()->showMessage(tr("Clipboard is empty — copy something first."),
+                                 2500);
+        return;
+    }
+    if (!m_mask) return;
+
+    // Build a single VoxelStroke covering every paste change so the whole
+    // paste is one undo step. Clipboard voxels with no current value enter
+    // as additions; clipboard voxels overwriting an existing colour record
+    // the old colour for undo.
+    VoxelStroke stroke;
+    stroke.frameIndex = m_timeline->currentIndex();
+
+    VoxelFrame& dst = m_timeline->currentFrame();
+    int applied = 0, skipped = 0;
+    for (const auto& [k, c] : m_clipboard.voxels()) {
+        if (!m_mask->contains(k.x, k.y, k.z)) { ++skipped; continue; }
+        const auto cur = dst.get(k.x, k.y, k.z);
+        // Identity guard — skip if the destination already has this colour.
+        if (cur && (*cur)[0] == c[0] && (*cur)[1] == c[1] && (*cur)[2] == c[2]) continue;
+
+        VoxelChange ch{};
+        ch.x = k.x; ch.y = k.y; ch.z = k.z;
+        if (cur) { ch.hadValue = true; ch.oldValue = *cur; }
+        ch.willHaveValue = true;
+        ch.newValue      = c;
+        stroke.changes.push_back(ch);
+
+        dst.set(k.x, k.y, k.z, c[0], c[1], c[2]);
+        ++applied;
+    }
+    if (applied > 0) {
+        m_timeline->notifyCurrentFrameEdited();
+        if (m_undoStack) {
+            m_undoStack->push(new VoxelStrokeCommand(m_timeline.get(), std::move(stroke)));
+        }
+    }
+    const QString msg = skipped > 0
+        ? tr("Pasted %1 voxels (%2 outside mask).").arg(applied).arg(skipped)
+        : tr("Pasted %1 voxels.").arg(applied);
+    statusBar()->showMessage(msg, 2500);
+}
+
+// ── Camera keyframes ─────────────────────────────────────────────────────────
+
+void MainWindow::onSetCameraKeyframe() {
+    if (!m_timeline || !m_viewport) return;
+    const int idx = m_timeline->currentIndex();
+    const auto& cam = m_viewport->camera();
+    m_cameraKeyframes[idx] = {cam.theta(), cam.phi(), cam.radius(), cam.target()};
+    statusBar()->showMessage(
+        tr("Camera keyframe set at frame %1 (%2 total).")
+            .arg(idx + 1).arg(m_cameraKeyframes.size()),
+        3000);
+}
+
+void MainWindow::onClearCameraKeyframe() {
+    if (!m_timeline) return;
+    const int idx = m_timeline->currentIndex();
+    if (m_cameraKeyframes.erase(idx) > 0) {
+        statusBar()->showMessage(
+            tr("Camera keyframe at frame %1 cleared.").arg(idx + 1), 2500);
+    } else {
+        statusBar()->showMessage(
+            tr("No camera keyframe at frame %1.").arg(idx + 1), 2500);
+    }
+}
+
+void MainWindow::onClearAllCameraKeyframes() {
+    if (m_cameraKeyframes.empty()) {
+        statusBar()->showMessage(tr("No camera keyframes to clear."), 2500);
+        return;
+    }
+    const int n = static_cast<int>(m_cameraKeyframes.size());
+    m_cameraKeyframes.clear();
+    statusBar()->showMessage(tr("Cleared %1 camera keyframes.").arg(n), 2500);
+}
+
+void MainWindow::onPlaybackCameraTick(int frameIdx) {
+    // Only drive the camera during actual playback — leave the user's manual
+    // orbit alone while they're stepping through frames or editing.
+    if (m_cameraKeyframes.empty() || !m_timeline || !m_timeline->isPlaying()) return;
+    applyKeyframe(m_viewport->camera(),
+                  interpolateKeyframe(m_cameraKeyframes, frameIdx));
+    m_viewport->update();
+}
+
+// ── Animation export ─────────────────────────────────────────────────────────
+
+void MainWindow::onExportAnimation() {
+    if (!m_timeline || m_timeline->frameCount() == 0) {
+        QMessageBox::information(this, tr("Nothing to export"),
+            tr("The timeline is empty."));
+        return;
+    }
+
+    const QString ffmpeg = QStandardPaths::findExecutable(QStringLiteral("ffmpeg"));
+    if (ffmpeg.isEmpty()) {
+        QMessageBox::warning(this, tr("ffmpeg not found"),
+            tr("ffmpeg is required to export animations.\n\n"
+               "Install it via your package manager — on Ubuntu:\n"
+               "    sudo apt install ffmpeg"));
+        return;
+    }
+
+    QString selectedFilter;
+    QString path = QFileDialog::getSaveFileName(
+        this, tr("Export animation"), QString(),
+        tr("MP4 video (*.mp4);;GIF image (*.gif);;WebM video (*.webm)"),
+        &selectedFilter);
+    if (path.isEmpty()) return;
+
+    // Linux's native save dialog doesn't append the filter's extension. If
+    // the user typed "testone" with the GIF filter active, fix it to
+    // "testone.gif" so ffmpeg picks the right container.
+    const bool hasKnownExt =
+           path.endsWith(QStringLiteral(".mp4"),  Qt::CaseInsensitive)
+        || path.endsWith(QStringLiteral(".gif"),  Qt::CaseInsensitive)
+        || path.endsWith(QStringLiteral(".webm"), Qt::CaseInsensitive);
+    if (!hasKnownExt) {
+        if      (selectedFilter.contains(QStringLiteral(".gif")))  path += QStringLiteral(".gif");
+        else if (selectedFilter.contains(QStringLiteral(".webm"))) path += QStringLiteral(".webm");
+        else                                                       path += QStringLiteral(".mp4");
+    }
+    const bool isGif = path.endsWith(QStringLiteral(".gif"), Qt::CaseInsensitive);
+
+    // Suspend the reactive engine and playback so the export sees clean
+    // timeline frames, not whatever the engine is currently overlaying.
+    const bool reactiveWasRunning = m_audioEngine && m_audioEngine->isRunning();
+    if (reactiveWasRunning) m_audioEngine->stop();
+    m_viewport->clearReactiveFrame();
+    const int  origFrame  = m_timeline->currentIndex();
+    const bool wasPlaying = m_timeline->isPlaying();
+    if (wasPlaying) m_timeline->stop();
+
+    // Snapshot the current camera so we can restore it after the export —
+    // applying keyframes mid-loop will mutate the live camera.
+    const auto& cam = m_viewport->camera();
+    const CameraKeyframe savedCamera{cam.theta(), cam.phi(), cam.radius(), cam.target()};
+    const bool hasKeyframes = !m_cameraKeyframes.empty();
+    auto driveCamera = [this, hasKeyframes](int i) {
+        if (!hasKeyframes) return;
+        applyKeyframe(m_viewport->camera(),
+                      interpolateKeyframe(m_cameraKeyframes, i));
+    };
+
+    // Probe frame 0 to discover the actual pixel size of the framebuffer
+    // (devicePixelRatio means QWidget::size() may not match the texture's
+    // pixel count). Round to even dims since H.264 needs that.
+    m_timeline->selectFrame(0);
+    driveCamera(0);
+    QApplication::processEvents();
+    QImage probe = m_viewport->grabFramebuffer().convertToFormat(QImage::Format_RGBA8888);
+    if (probe.isNull()) {
+        QMessageBox::warning(this, tr("Export failed"),
+            tr("Failed to capture the viewport framebuffer."));
+        m_timeline->selectFrame(origFrame);
+        return;
+    }
+    const int w = (probe.width()  / 2) * 2;
+    const int h = (probe.height() / 2) * 2;
+    if (w != probe.width() || h != probe.height()) {
+        probe = probe.copy(0, 0, w, h);
+    }
+
+    const int fps = std::max(1, m_timeline->fps());
+    QStringList args = {
+        QStringLiteral("-y"),
+        QStringLiteral("-f"),            QStringLiteral("rawvideo"),
+        QStringLiteral("-pixel_format"), QStringLiteral("rgba"),
+        QStringLiteral("-video_size"),   QString("%1x%2").arg(w).arg(h),
+        QStringLiteral("-framerate"),    QString::number(fps),
+        QStringLiteral("-i"),            QStringLiteral("-"),
+    };
+    if (isGif) {
+        // Single-pipeline palettegen → paletteuse keeps GIF size reasonable
+        // and avoids the two-pass dance with a temp file.
+        args << QStringLiteral("-vf")
+             << QStringLiteral("split[a][b];[a]palettegen=stats_mode=diff[p];"
+                               "[b][p]paletteuse=dither=bayer:bayer_scale=5:diff_mode=rectangle");
+    } else {
+        args << QStringLiteral("-pix_fmt") << QStringLiteral("yuv420p")
+             << QStringLiteral("-crf")     << QStringLiteral("20");
+    }
+    args << path;
+
+    QProcess proc;
+    proc.start(ffmpeg, args);
+    if (!proc.waitForStarted(3000)) {
+        QMessageBox::warning(this, tr("Export failed"),
+            tr("ffmpeg failed to start: %1").arg(proc.errorString()));
+        m_timeline->selectFrame(origFrame);
+        return;
+    }
+
+    const int n = m_timeline->frameCount();
+    QProgressDialog progress(
+        tr("Exporting frame 1 of %1…").arg(n),
+        tr("Cancel"), 0, n, this);
+    progress.setWindowModality(Qt::WindowModal);
+    progress.setMinimumDuration(200);
+
+    auto writeFrame = [&](const QImage& img) -> bool {
+        proc.write(reinterpret_cast<const char*>(img.constBits()),
+                   static_cast<qint64>(img.sizeInBytes()));
+        // Backpressure: wait for the OS pipe buffer to drain so we don't
+        // outrun ffmpeg's input on long timelines.
+        return proc.waitForBytesWritten(5000);
+    };
+
+    bool cancelled = false;
+    if (!writeFrame(probe)) {
+        QMessageBox::warning(this, tr("Export failed"),
+            tr("ffmpeg stalled while accepting frame 1."));
+        proc.kill();
+        proc.waitForFinished(1000);
+        m_timeline->selectFrame(origFrame);
+        return;
+    }
+    progress.setValue(1);
+
+    for (int i = 1; i < n; ++i) {
+        if (progress.wasCanceled()) { cancelled = true; break; }
+        progress.setLabelText(tr("Exporting frame %1 of %2…").arg(i + 1).arg(n));
+        m_timeline->selectFrame(i);
+        driveCamera(i);
+        QApplication::processEvents();
+        QImage img = m_viewport->grabFramebuffer().convertToFormat(QImage::Format_RGBA8888);
+        if (img.width() != w || img.height() != h) img = img.copy(0, 0, w, h);
+        if (!writeFrame(img)) { cancelled = true; break; }
+        progress.setValue(i + 1);
+    }
+
+    proc.closeWriteChannel();
+    // GIF's palette pass needs more headroom than a straight video encode.
+    proc.waitForFinished(isGif ? 60000 : 15000);
+
+    // Restore frame + camera so the user's editing context is unchanged.
+    m_timeline->selectFrame(origFrame);
+    applyKeyframe(m_viewport->camera(), savedCamera);
+    m_viewport->update();
+
+    if (cancelled) {
+        proc.kill();
+        proc.waitForFinished(1000);
+        QFile::remove(path);
+        statusBar()->showMessage(tr("Export cancelled."), 3000);
+        return;
+    }
+    if (proc.exitStatus() != QProcess::NormalExit || proc.exitCode() != 0) {
+        const QString err = QString::fromUtf8(proc.readAllStandardError());
+        QMessageBox::warning(this, tr("Export failed"),
+            tr("ffmpeg exited with code %1.\n\n%2")
+                .arg(proc.exitCode())
+                .arg(err.isEmpty() ? tr("(no stderr output)") : err));
+        return;
+    }
+    statusBar()->showMessage(tr("Exported %1 frames to %2").arg(n).arg(path), 5000);
+}
+
 void MainWindow::onColorChanged(uint8_t r, uint8_t g, uint8_t b) {
     m_viewport->setPaintColor(r, g, b);
 }
 
 void MainWindow::onSliceChanged(int sx, int sy, int sz) {
     m_viewport->setSlice(sx, sy, sz);
+    m_sliceX = sx;
+    m_sliceY = sy;
+    m_sliceZ = sz;
 }
 
 // ── File menu ────────────────────────────────────────────────────────────────

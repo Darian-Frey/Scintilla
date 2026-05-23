@@ -633,42 +633,63 @@ void CubeViewport::applyToolStroke(int instanceIdx) {
     if (!m_mask || !m_timeline || instanceIdx < 0
         || static_cast<size_t>(instanceIdx) >= m_mask->positions().size()) return;
 
-    const VoxelKey k = m_mask->positions()[static_cast<size_t>(instanceIdx)];
+    const VoxelKey base = m_mask->positions()[static_cast<size_t>(instanceIdx)];
 
-    // Slice filter — only paint voxels currently visible in the active slice.
-    if (m_sliceX >= 0 && k.x != m_sliceX) return;
-    if (m_sliceY >= 0 && k.y != m_sliceY) return;
-    if (m_sliceZ >= 0 && k.z != m_sliceZ) return;
+    // Slice filter — the *picked* voxel must be in the active slice. Mirror
+    // copies are written regardless of slice (otherwise symmetry would break
+    // while slicing is on).
+    if (m_sliceX >= 0 && base.x != m_sliceX) return;
+    if (m_sliceY >= 0 && base.y != m_sliceY) return;
+    if (m_sliceZ >= 0 && base.z != m_sliceZ) return;
 
-    if (m_strokedKeys.count(k)) return;
-    m_strokedKeys.insert(k);
+    // Mirror plane is at (size-1)/2; integer reflection is (size-1) - coord.
+    const int n  = m_mask->gridSize();
+    const int mx = (n - 1) - base.x;
+    const int my = (n - 1) - base.y;
+    const int mz = (n - 1) - base.z;
 
-    auto& frame = m_timeline->currentFrame();
-    const auto cur = frame.get(k.x, k.y, k.z);
+    std::set<VoxelKey> targets{base};
+    if (m_mirrorX)                          targets.insert({mx, base.y, base.z});
+    if (m_mirrorY)                          targets.insert({base.x, my, base.z});
+    if (m_mirrorZ)                          targets.insert({base.x, base.y, mz});
+    if (m_mirrorX && m_mirrorY)             targets.insert({mx, my, base.z});
+    if (m_mirrorX && m_mirrorZ)             targets.insert({mx, base.y, mz});
+    if (m_mirrorY && m_mirrorZ)             targets.insert({base.x, my, mz});
+    if (m_mirrorX && m_mirrorY && m_mirrorZ) targets.insert({mx, my, mz});
 
-    VoxelChange ch{};
-    ch.x = k.x; ch.y = k.y; ch.z = k.z;
-    if (cur) { ch.hadValue = true; ch.oldValue = *cur; }
+    auto& frame   = m_timeline->currentFrame();
+    bool  changed = false;
 
-    if (m_tool == Tool::Paint) {
-        // Identity guard — don't record a no-op when the voxel is already
-        // the exact paint colour.
-        if (cur && (*cur)[0] == m_paintColor[0]
-                && (*cur)[1] == m_paintColor[1]
-                && (*cur)[2] == m_paintColor[2]) return;
-        frame.set(k.x, k.y, k.z,
-                  m_paintColor[0], m_paintColor[1], m_paintColor[2]);
-        ch.willHaveValue = true;
-        ch.newValue      = m_paintColor;
-        emit voxelEdited(k.x, k.y, k.z,
-                         m_paintColor[0], m_paintColor[1], m_paintColor[2], false);
-    } else {   // Tool::Erase
-        if (!cur) return;   // identity guard
-        frame.erase(k.x, k.y, k.z);
-        ch.willHaveValue = false;
-        emit voxelEdited(k.x, k.y, k.z, 0, 0, 0, true);
+    for (const VoxelKey& k : targets) {
+        if (m_strokedKeys.count(k)) continue;
+        // Mirrors may land outside the shape mask (e.g. on a sphere or pyramid).
+        if (!m_mask->contains(k.x, k.y, k.z)) continue;
+        m_strokedKeys.insert(k);
+
+        const auto cur = frame.get(k.x, k.y, k.z);
+        VoxelChange ch{};
+        ch.x = k.x; ch.y = k.y; ch.z = k.z;
+        if (cur) { ch.hadValue = true; ch.oldValue = *cur; }
+
+        if (m_tool == Tool::Paint) {
+            if (cur && (*cur)[0] == m_paintColor[0]
+                    && (*cur)[1] == m_paintColor[1]
+                    && (*cur)[2] == m_paintColor[2]) continue;
+            frame.set(k.x, k.y, k.z,
+                      m_paintColor[0], m_paintColor[1], m_paintColor[2]);
+            ch.willHaveValue = true;
+            ch.newValue      = m_paintColor;
+            emit voxelEdited(k.x, k.y, k.z,
+                             m_paintColor[0], m_paintColor[1], m_paintColor[2], false);
+        } else {   // Tool::Erase
+            if (!cur) continue;
+            frame.erase(k.x, k.y, k.z);
+            ch.willHaveValue = false;
+            emit voxelEdited(k.x, k.y, k.z, 0, 0, 0, true);
+        }
+        m_currentStroke.changes.push_back(ch);
+        changed = true;
     }
 
-    m_timeline->notifyCurrentFrameEdited();
-    m_currentStroke.changes.push_back(ch);
+    if (changed) m_timeline->notifyCurrentFrameEdited();
 }

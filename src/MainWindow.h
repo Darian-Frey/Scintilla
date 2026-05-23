@@ -1,7 +1,9 @@
 #pragma once
 
 #include <QMainWindow>
+#include <QVector3D>
 #include <cstdint>
+#include <map>
 #include <memory>
 
 #include "audio/FFTProcessor.h"   // for BandData (used in onReactivePresetBands slot)
@@ -26,6 +28,18 @@ class QUndoStack;
 enum class Tool;
 enum class ReactiveMode;
 enum class ReactiveBlend;
+
+// ── CameraKeyframe ───────────────────────────────────────────────────────────
+//
+// Snapshot of the orbit camera state used by the rotation-keyframe feature.
+// Linearly interpolated between bracketing keyframes during playback and
+// export to produce fly-through animations without scripted motion.
+struct CameraKeyframe {
+    float     theta  = 0.0f;
+    float     phi    = 0.0f;
+    float     radius = 0.0f;
+    QVector3D target;
+};
 
 // ── MainWindow ────────────────────────────────────────────────────────────────
 //
@@ -87,6 +101,19 @@ private slots:
     void onLoadReactivePreset();           // panel "Load preset…" button
     void onReactivePresetBands(BandData d);// engine → runner per-frame routing
 
+    // ── Clipboard (frame / slice copy-paste) ─────────────────────────────────
+    void onCopy();
+    void onPaste();
+
+    // ── Animation export (GIF / MP4 / WebM via ffmpeg) ───────────────────────
+    void onExportAnimation();
+
+    // ── Camera keyframes (fly-through animation) ─────────────────────────────
+    void onSetCameraKeyframe();
+    void onClearCameraKeyframe();
+    void onClearAllCameraKeyframes();
+    void onPlaybackCameraTick(int frameIdx);   // drives camera during playback
+
 private:
     void buildMenus();
     void buildToolbar();
@@ -113,6 +140,22 @@ private:
     QString                             m_currentPath;   // last save/open path
 
     QUndoStack*                         m_undoStack      = nullptr;   // voxel stroke history
+
+    // ── Clipboard ─────────────────────────────────────────────────────────────
+    // In-memory voxel clipboard for Edit → Copy / Paste. Holds the entire
+    // frame when no slice is active, or just the active slice's voxels.
+    VoxelFrame                          m_clipboard;
+    bool                                m_clipboardHasContent = false;
+
+    // Cached slice state — mirrored from SliceControlWidget so Copy/Paste
+    // know which slice (if any) to restrict themselves to.
+    int                                 m_sliceX = -1, m_sliceY = -1, m_sliceZ = -1;
+
+    // ── Camera keyframes ──────────────────────────────────────────────────────
+    // Sparse map: frame index → camera state. Frames between keyframes
+    // interpolate; frames outside the extremes clamp to the nearest one.
+    // Session-only — not persisted in the JSON save format.
+    std::map<int, CameraKeyframe>       m_cameraKeyframes;
 
     // ── Audio reactive plumbing ───────────────────────────────────────────────
     std::unique_ptr<AudioReactiveEngine> m_audioEngine;

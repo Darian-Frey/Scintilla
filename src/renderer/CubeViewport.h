@@ -42,6 +42,14 @@ public:
     void setPaintColor(uint8_t r, uint8_t g, uint8_t b) { m_paintColor = {r, g, b}; }
     void setSlice(int x, int y, int z);
 
+    // Mirror toggles — when on, Paint/Erase/Fill duplicate each edit across
+    // the cube's midplane on that axis. All three may be combined (up to 8x
+    // mirroring). The picked voxel still respects the slice filter; its
+    // mirrored copies are written regardless of slice.
+    void setMirrorX(bool on) { m_mirrorX = on; }
+    void setMirrorY(bool on) { m_mirrorY = on; }
+    void setMirrorZ(bool on) { m_mirrorZ = on; }
+
     void setShowGhost(bool show);
     void setShowBounds(bool show);
     void setShowAxisGizmo(bool show);
@@ -119,6 +127,7 @@ private:
     Tool        m_tool       = Tool::Paint;
     RGB         m_paintColor = {255, 0, 0};
     int         m_sliceX     = -1, m_sliceY = -1, m_sliceZ = -1;
+    bool        m_mirrorX    = false, m_mirrorY = false, m_mirrorZ = false;
     bool        m_showGhost     = true;
     bool        m_showBounds    = true;
     bool        m_showAxisGizmo = true;
