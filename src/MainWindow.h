@@ -7,6 +7,7 @@
 #include "audio/FFTProcessor.h"   // for BandData (used in onReactivePresetBands slot)
 #include "core/AnimationTimeline.h"
 #include "core/ShapeMask.h"
+#include "core/VoxelStroke.h"     // for VoxelStroke (used in onStrokeCommitted slot)
 
 class CubeViewport;
 class ColorPickerWidget;
@@ -20,6 +21,7 @@ class PresetRunner;
 class QActionGroup;
 class QAction;
 class QTimer;
+class QUndoStack;
 
 enum class Tool;
 enum class ReactiveMode;
@@ -44,6 +46,7 @@ private slots:
                        uint8_t r, uint8_t g, uint8_t b,
                        bool erased);
     void onColorPicked(uint8_t r, uint8_t g, uint8_t b);
+    void onStrokeCommitted(VoxelStroke stroke);
 
     // ── UI → state ────────────────────────────────────────────────────────────
     void onColorChanged(uint8_t r, uint8_t g, uint8_t b);
@@ -108,6 +111,8 @@ private:
 
     QActionGroup*                       m_toolGroup      = nullptr;
     QString                             m_currentPath;   // last save/open path
+
+    QUndoStack*                         m_undoStack      = nullptr;   // voxel stroke history
 
     // ── Audio reactive plumbing ───────────────────────────────────────────────
     std::unique_ptr<AudioReactiveEngine> m_audioEngine;

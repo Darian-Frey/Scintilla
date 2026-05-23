@@ -6,11 +6,14 @@
 #include <QTimer>
 #include <memory>
 
+#include <set>
+
 #include "OrbitCamera.h"
 #include "LedInstanceBuffer.h"
 #include "core/AnimationTimeline.h"
 #include "core/ShapeMask.h"
 #include "core/VoxelFrame.h"
+#include "core/VoxelStroke.h"
 
 // ── Tool ──────────────────────────────────────────────────────────────────────
 enum class Tool { Paint, Erase, Fill, Pick };
@@ -62,6 +65,11 @@ signals:
     void voxelEdited(int x, int y, int z, uint8_t r, uint8_t g, uint8_t b, bool erased);
     void colorPicked(uint8_t r, uint8_t g, uint8_t b);
     void pickRayMiss();
+
+    // Emitted at mouse-release for Paint/Erase tools. MainWindow wraps the
+    // payload in a QUndoCommand for Ctrl+Z support. Identity changes are
+    // pre-filtered, so an empty stroke is never emitted.
+    void strokeCommitted(VoxelStroke stroke);
 
 protected:
     void initializeGL()                     override;
@@ -135,5 +143,11 @@ private:
     // Returns instance index (-1 = miss). Uses GPU depth readback for accuracy.
     int pickInstance(QPoint screenPos);
 
-    void applyTool(int instanceIdx);
+    void applyTool(int instanceIdx);          // Pick / Fill — one-shot, no undo
+    void applyToolStroke(int instanceIdx);    // Paint / Erase — appends to m_currentStroke
+
+    // ── Stroke painting state (active while LMB held with Paint/Erase) ───────
+    bool                m_strokeActive = false;
+    VoxelStroke         m_currentStroke;
+    std::set<VoxelKey>  m_strokedKeys;   // de-dup: don't repaint a voxel twice in one stroke
 };

@@ -218,6 +218,25 @@ void CubeViewport::mousePressEvent(QMouseEvent* e) {
     m_lastPos   = e->pos();
     m_dragging  = false;
     m_shiftDrag = (e->modifiers() & Qt::ShiftModifier) || (e->buttons() & Qt::MiddleButton);
+    m_strokeActive = false;
+
+    // Paint/Erase: a left-click that lands on a voxel starts a stroke. The
+    // first voxel is painted immediately; subsequent move events extend the
+    // stroke. A click that misses falls through to camera orbit on drag.
+    // Right-mouse drag stays reserved for orbit regardless of tool, so the
+    // user can still rotate the cube without switching tools.
+    if (e->button() == Qt::LeftButton && !m_shiftDrag
+        && (m_tool == Tool::Paint || m_tool == Tool::Erase)) {
+        const int idx = pickInstance(e->pos());
+        if (idx >= 0) {
+            m_strokeActive  = true;
+            m_currentStroke = {};
+            m_currentStroke.frameIndex =
+                m_timeline ? m_timeline->currentIndex() : -1;
+            m_strokedKeys.clear();
+            applyToolStroke(idx);
+        }
+    }
 }
 
 void CubeViewport::mouseMoveEvent(QMouseEvent* e) {
@@ -226,15 +245,33 @@ void CubeViewport::mouseMoveEvent(QMouseEvent* e) {
     const int dy = e->pos().y() - m_lastPos.y();
     m_lastPos    = e->pos();
     if ((e->pos() - m_pressPos).manhattanLength() > kClickSlopPx) m_dragging = true;
+
+    if (m_strokeActive) {
+        const int idx = pickInstance(e->pos());
+        if (idx >= 0) applyToolStroke(idx);
+        return;
+    }
+
     if (m_shiftDrag) m_camera.pan(dx, dy);
     else             m_camera.orbit(dx, dy);
     update();
 }
 
 void CubeViewport::mouseReleaseEvent(QMouseEvent* e) {
+    if (m_strokeActive) {
+        if (!m_currentStroke.changes.empty()) {
+            emit strokeCommitted(std::move(m_currentStroke));
+        }
+        m_currentStroke = {};
+        m_strokedKeys.clear();
+        m_strokeActive = false;
+        m_dragging     = false;
+        m_shiftDrag    = false;
+        return;
+    }
     if (!m_dragging && e->button() == Qt::LeftButton) {
         const int idx = pickInstance(e->pos());
-        if (idx >= 0)        applyTool(idx);
+        if (idx >= 0)        applyTool(idx);   // Pick / Fill only — Paint/Erase went through stroke path
         else                 emit pickRayMiss();
     }
     m_dragging  = false;
@@ -560,22 +597,11 @@ void CubeViewport::applyTool(int instanceIdx) {
 
     switch (m_tool) {
         case Tool::Paint:
-            if (m_timeline) {
-                m_timeline->currentFrame().set(k.x, k.y, k.z,
-                                               m_paintColor[0], m_paintColor[1], m_paintColor[2]);
-                m_timeline->notifyCurrentFrameEdited();
-            }
-            emit voxelEdited(k.x, k.y, k.z,
-                             m_paintColor[0], m_paintColor[1], m_paintColor[2], false);
-            break;
-
         case Tool::Erase:
-            if (m_timeline) {
-                m_timeline->currentFrame().erase(k.x, k.y, k.z);
-                m_timeline->notifyCurrentFrameEdited();
-            }
-            emit voxelEdited(k.x, k.y, k.z, 0, 0, 0, true);
-            break;
+            // These go through the stroke path now; if applyTool() is called
+            // for them (shouldn't happen under current mouse logic), bail
+            // rather than mutate without an undo record.
+            return;
 
         case Tool::Pick:
             if (m_timeline) {
@@ -601,4 +627,48 @@ void CubeViewport::applyTool(int instanceIdx) {
             }
             break;
     }
+}
+
+void CubeViewport::applyToolStroke(int instanceIdx) {
+    if (!m_mask || !m_timeline || instanceIdx < 0
+        || static_cast<size_t>(instanceIdx) >= m_mask->positions().size()) return;
+
+    const VoxelKey k = m_mask->positions()[static_cast<size_t>(instanceIdx)];
+
+    // Slice filter — only paint voxels currently visible in the active slice.
+    if (m_sliceX >= 0 && k.x != m_sliceX) return;
+    if (m_sliceY >= 0 && k.y != m_sliceY) return;
+    if (m_sliceZ >= 0 && k.z != m_sliceZ) return;
+
+    if (m_strokedKeys.count(k)) return;
+    m_strokedKeys.insert(k);
+
+    auto& frame = m_timeline->currentFrame();
+    const auto cur = frame.get(k.x, k.y, k.z);
+
+    VoxelChange ch{};
+    ch.x = k.x; ch.y = k.y; ch.z = k.z;
+    if (cur) { ch.hadValue = true; ch.oldValue = *cur; }
+
+    if (m_tool == Tool::Paint) {
+        // Identity guard — don't record a no-op when the voxel is already
+        // the exact paint colour.
+        if (cur && (*cur)[0] == m_paintColor[0]
+                && (*cur)[1] == m_paintColor[1]
+                && (*cur)[2] == m_paintColor[2]) return;
+        frame.set(k.x, k.y, k.z,
+                  m_paintColor[0], m_paintColor[1], m_paintColor[2]);
+        ch.willHaveValue = true;
+        ch.newValue      = m_paintColor;
+        emit voxelEdited(k.x, k.y, k.z,
+                         m_paintColor[0], m_paintColor[1], m_paintColor[2], false);
+    } else {   // Tool::Erase
+        if (!cur) return;   // identity guard
+        frame.erase(k.x, k.y, k.z);
+        ch.willHaveValue = false;
+        emit voxelEdited(k.x, k.y, k.z, 0, 0, 0, true);
+    }
+
+    m_timeline->notifyCurrentFrameEdited();
+    m_currentStroke.changes.push_back(ch);
 }

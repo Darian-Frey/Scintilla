@@ -49,6 +49,7 @@ set(SOURCES
     src/core/ShapeMask.cpp
     src/core/AnimationTimeline.cpp
     src/core/JsonSerializer.cpp
+    src/core/VoxelStrokeCommand.cpp
 
     src/renderer/CubeViewport.cpp
     src/renderer/OrbitCamera.cpp
@@ -79,6 +80,8 @@ set(HEADERS
     src/core/ShapeMask.h
     src/core/AnimationTimeline.h
     src/core/JsonSerializer.h
+    src/core/VoxelStroke.h
+    src/core/VoxelStrokeCommand.h
 
     src/renderer/CubeViewport.h
     src/renderer/OrbitCamera.h

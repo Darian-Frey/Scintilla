@@ -8,6 +8,7 @@
 #include "ui/SliceControlWidget.h"
 #include "ui/TimelineWidget.h"
 #include "core/JsonSerializer.h"
+#include "core/VoxelStrokeCommand.h"
 #include "audio/AudioReactiveEngine.h"
 #include "audio/AudioDevicePicker.h"
 #include "scripting/PresetRunner.h"
@@ -15,6 +16,7 @@
 #include <QAction>
 #include <QActionGroup>
 #include <QApplication>
+#include <QUndoStack>
 #include <QDockWidget>
 #include <QFileDialog>
 #include <QInputDialog>
@@ -53,6 +55,9 @@ MainWindow::MainWindow(QWidget* parent)
     setCentralWidget(m_viewport);
 
     m_audioEngine->setMask(m_mask);
+
+    m_undoStack = new QUndoStack(this);
+    m_undoStack->setUndoLimit(200);   // bounded depth — voxel strokes can be large
 
     buildDocks();
     buildMenus();
@@ -160,6 +165,15 @@ void MainWindow::buildMenus() {
     file->addSeparator();
     file->addAction(tr("E&xit"),      QKeySequence::Quit,   qApp, &QApplication::quit);
 
+    // ─── Edit ────────────────────────────────────────────────────────────────
+    auto* edit = mbar->addMenu(tr("&Edit"));
+    auto* undoAct = m_undoStack->createUndoAction(this, tr("&Undo"));
+    undoAct->setShortcut(QKeySequence::Undo);
+    edit->addAction(undoAct);
+    auto* redoAct = m_undoStack->createRedoAction(this, tr("&Redo"));
+    redoAct->setShortcut(QKeySequence::Redo);
+    edit->addAction(redoAct);
+
     // ─── View ────────────────────────────────────────────────────────────────
     auto* view = mbar->addMenu(tr("&View"));
     auto add_toggle = [&](const QString& text, bool initial, void (MainWindow::*slot)(bool)) -> QAction* {
@@ -253,6 +267,14 @@ void MainWindow::wireSignals() {
             this, &MainWindow::onVoxelEdited);
     connect(m_viewport, &CubeViewport::colorPicked,
             this, &MainWindow::onColorPicked);
+    connect(m_viewport, &CubeViewport::strokeCommitted,
+            this, &MainWindow::onStrokeCommitted);
+
+    // Adding/deleting/replacing frames invalidates any pending undo records
+    // (their saved frameIndex may now point at a different frame or none).
+    // Cheapest fix is to drop history on any structural change.
+    connect(m_timeline.get(), &AnimationTimeline::timelineStructureChanged,
+            this, [this]() { if (m_undoStack) m_undoStack->clear(); });
 
     connect(m_colorPicker, &ColorPickerWidget::colorChanged,
             this, &MainWindow::onColorChanged);
@@ -290,6 +312,14 @@ void MainWindow::onVoxelEdited(int /*x*/, int /*y*/, int /*z*/,
 void MainWindow::onColorPicked(uint8_t r, uint8_t g, uint8_t b) {
     m_colorPicker->setCurrentColor(r, g, b);   // also pushes to history
     m_viewport->setPaintColor(r, g, b);
+}
+
+void MainWindow::onStrokeCommitted(VoxelStroke stroke) {
+    if (!m_undoStack) return;
+    // The viewport already applied the stroke during the drag, so the
+    // QUndoCommand's first redo() is suppressed; subsequent redo() calls
+    // re-apply after a user-driven undo.
+    m_undoStack->push(new VoxelStrokeCommand(m_timeline.get(), std::move(stroke)));
 }
 
 void MainWindow::onColorChanged(uint8_t r, uint8_t g, uint8_t b) {
