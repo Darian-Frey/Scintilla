@@ -59,6 +59,8 @@ set(SOURCES
     src/ui/TimelineWidget.cpp
     src/ui/FrameInfoPanel.cpp
     src/ui/AudioReactivePanel.cpp
+    src/ui/PresetEditorPanel.cpp
+    src/ui/PythonHighlighter.cpp
 
     src/audio/AudioWorker.cpp
     src/audio/FFTProcessor.cpp
@@ -87,6 +89,8 @@ set(HEADERS
     src/ui/TimelineWidget.h
     src/ui/FrameInfoPanel.h
     src/ui/AudioReactivePanel.h
+    src/ui/PresetEditorPanel.h
+    src/ui/PythonHighlighter.h
 
     src/audio/AudioWorker.h
     src/audio/FFTProcessor.h

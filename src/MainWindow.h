@@ -15,6 +15,7 @@ class TimelineWidget;
 class FrameInfoPanel;
 class AudioReactiveEngine;
 class AudioReactivePanel;
+class PresetEditorPanel;
 class PresetRunner;
 class QActionGroup;
 class QAction;
@@ -100,6 +101,7 @@ private:
     SliceControlWidget*                 m_sliceControl   = nullptr;
     TimelineWidget*                     m_timelineWidget = nullptr;
     FrameInfoPanel*                     m_frameInfo      = nullptr;
+    PresetEditorPanel*                  m_presetEditor   = nullptr;
 
     std::unique_ptr<AnimationTimeline>  m_timeline;
     std::shared_ptr<ShapeMask>          m_mask;

@@ -4,6 +4,7 @@
 #include "ui/AudioReactivePanel.h"
 #include "ui/ColorPickerWidget.h"
 #include "ui/FrameInfoPanel.h"
+#include "ui/PresetEditorPanel.h"
 #include "ui/SliceControlWidget.h"
 #include "ui/TimelineWidget.h"
 #include "core/JsonSerializer.h"
@@ -121,6 +122,7 @@ void MainWindow::buildDocks() {
     m_frameInfo      = new FrameInfoPanel(this);
     m_timelineWidget = new TimelineWidget(this);
     m_audioPanel     = new AudioReactivePanel(m_audioEngine.get(), this);
+    m_presetEditor   = new PresetEditorPanel(this);
 
     m_sliceControl->setGridSize(m_mask->gridSize());
     m_frameInfo->setMask(m_mask);
@@ -132,7 +134,14 @@ void MainWindow::buildDocks() {
     makeDock(tr("Slice"),          scrollable(m_sliceControl), Qt::RightDockWidgetArea);
     makeDock(tr("Audio reactive"), scrollable(m_audioPanel),   Qt::RightDockWidgetArea);
     makeDock(tr("Frame"),          scrollable(m_frameInfo),    Qt::RightDockWidgetArea);
-    makeDock(tr("Timeline"),       m_timelineWidget,           Qt::BottomDockWidgetArea);
+    auto* timelineDock = makeDock(tr("Timeline"),
+                                  m_timelineWidget,           Qt::BottomDockWidgetArea);
+    auto* editorDock   = makeDock(tr("Preset editor"),
+                                  m_presetEditor,             Qt::BottomDockWidgetArea);
+    // Tabify so the bottom dock area shows one tab per panel; user can drag
+    // them apart or float either if they want both visible.
+    tabifyDockWidget(timelineDock, editorDock);
+    timelineDock->raise();
 }
 
 // ── Menus ────────────────────────────────────────────────────────────────────
@@ -636,7 +645,10 @@ void MainWindow::onPresetFrameReady(VoxelFrame f) {
 
 void MainWindow::onPresetLoaded(const QString& name) {
     statusBar()->showMessage(tr("Preset loaded: %1").arg(name), 3000);
-    if (m_audioPanel) m_audioPanel->setPresetStatus(name);
+    if (m_audioPanel)   m_audioPanel->setPresetStatus(name);
+    if (m_presetEditor && m_presetRunner) {
+        m_presetEditor->loadFile(m_presetRunner->filePath());
+    }
 }
 
 // Construct the PresetRunner the first time it's needed and wire its signals.
@@ -653,7 +665,12 @@ void MainWindow::ensurePresetRunner() {
             this, &MainWindow::onPresetError);
     connect(m_presetRunner.get(), &PresetRunner::presetUnloaded,
             this, [this]() {
-                if (m_audioPanel) m_audioPanel->setPresetStatus(QString());
+                if (m_audioPanel)   m_audioPanel->setPresetStatus(QString());
+                if (m_presetEditor) m_presetEditor->clearFile();
+            });
+    connect(m_presetRunner.get(), &PresetRunner::hotReloaded,
+            this, [this]() {
+                statusBar()->showMessage(tr("Preset hot-reloaded."), 1500);
             });
 }
 
