@@ -18,6 +18,7 @@
 #include <QApplication>
 #include <QImage>
 #include <QProgressDialog>
+#include <QRegularExpression>
 #include <QStandardPaths>
 #include <QUndoStack>
 #include <QDockWidget>
@@ -79,6 +80,33 @@ namespace {
         cam.setPhi   (k.phi);
         cam.setRadius(k.radius);
         cam.setTarget(k.target);
+    }
+
+    // ── Python script type detection ─────────────────────────────────────────
+    //
+    // Each script must subclass either Preset (reactive — driven by audio
+    // bands) or Animation (run-once — emits frames itself). Loading the
+    // wrong type into the wrong run mode causes runtime errors per audio
+    // frame, so we sniff the file content up-front to refuse before any
+    // subprocess is started.
+
+    enum class ScriptType { Unknown, Preset, Animation };
+
+    ScriptType detectScriptType(const QString& path) {
+        QFile f(path);
+        if (!f.open(QFile::ReadOnly | QFile::Text)) return ScriptType::Unknown;
+        const QString content = QString::fromUtf8(f.readAll());
+        // Match `class X(Animation)` or `class X(Preset)` permissively over
+        // whitespace. Doesn't catch `from led_cube import Animation as A;
+        // class X(A)` but that's an unusual idiom and the runtime still
+        // catches the mismatch via the runner's error path.
+        static const QRegularExpression reAnimation(
+            QStringLiteral("class\\s+\\w+\\s*\\(\\s*Animation\\s*\\)"));
+        static const QRegularExpression rePreset(
+            QStringLiteral("class\\s+\\w+\\s*\\(\\s*Preset\\s*\\)"));
+        if (reAnimation.match(content).hasMatch()) return ScriptType::Animation;
+        if (rePreset.match(content).hasMatch())    return ScriptType::Preset;
+        return ScriptType::Unknown;
     }
 }
 
@@ -1013,6 +1041,14 @@ void MainWindow::onRunPreset() {
         tr("Python presets (*.py)"));
     if (path.isEmpty()) return;
 
+    // If the user picked an Animation script, the offline-synthetic-audio
+    // path would just spam frame errors; route it through the animation
+    // path which knows how to receive its frames.
+    if (detectScriptType(path) == ScriptType::Animation) {
+        runAnimationScript(path);
+        return;
+    }
+
     if (!confirmDiscardIfDirty(tr("Running a preset appends generated frames to the timeline. Continue?"))) {
         return;
     }
@@ -1251,6 +1287,14 @@ void MainWindow::runAnimationScript(const QString& path) {
             tr("Animation script does not exist: %1").arg(path));
         return;
     }
+    if (detectScriptType(path) == ScriptType::Preset) {
+        QMessageBox::warning(this, tr("Wrong script type"),
+            tr("%1 is a reactive Preset, not an Animation. To play it with "
+               "audio, switch the Audio reactive panel to \"Python preset\" "
+               "and use its Load preset… button.")
+                .arg(QFileInfo(path).fileName()));
+        return;
+    }
     if (!confirmDiscardIfDirty(
             tr("Running an animation script clears the timeline and replaces it "
                "with the generated frames. Continue?"))) {
@@ -1296,6 +1340,18 @@ void MainWindow::onLoadReactivePreset() {
         tr("Python presets (*.py)"));
     if (path.isEmpty()) return;
 
+    // Refuse Animation scripts up front. Loading one here and then enabling
+    // audio sends one error per audio frame from the subprocess — at ~60 Hz
+    // each was opening a modal warning and effectively locking the UI.
+    if (detectScriptType(path) == ScriptType::Animation) {
+        QMessageBox::warning(this, tr("Wrong script type"),
+            tr("%1 is an Animation script (run-once). The Python preset "
+               "reactive mode needs a Preset script.\n\n"
+               "Use File → Run animation script… to play this file instead.")
+                .arg(QFileInfo(path).fileName()));
+        return;
+    }
+
     ensurePresetRunner();
     m_presetRunner->setCubeMeta(m_mask->gridSize(),
                                 QString::fromStdString(shapeTypeName(m_mask->shape())),
@@ -1313,9 +1369,43 @@ void MainWindow::onReactivePresetBands(BandData d) {
 
 void MainWindow::onPresetError(const QString& msg, int line) {
     if (m_presetPlaybackTimer) m_presetPlaybackTimer->stop();
-    const QString detail = (line >= 0)
+
+    // If errors arrive while the audio engine is feeding the runner, stop
+    // the engine immediately — otherwise we'd be in a feedback loop where
+    // each band push triggers another error per audio frame. Without this
+    // an Animation loaded into the Python-preset reactive mode floods the
+    // UI thread with modal dialogs and locks up the system.
+    if (m_audioEngine && m_audioEngine->isRunning()
+        && m_audioEngine->mode() == ReactiveMode::PythonPreset) {
+        m_audioEngine->setMode(ReactiveMode::Off);
+        m_audioEngine->stop();
+        m_viewport->clearReactiveFrame();
+        if (m_captureAction) {
+            m_captureAction->setChecked(false);
+            m_captureAction->setEnabled(false);
+        }
+    }
+
+    // Throttle dialogs to at most one per 5 seconds. Any additional errors
+    // in that window are counted and shown in the next dialog.
+    constexpr qint64 kThrottleMs = 5000;
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    if (m_lastPresetErrorMs != 0 && (now - m_lastPresetErrorMs) < kThrottleMs) {
+        ++m_suppressedErrors;
+        statusBar()->showMessage(
+            tr("Preset error suppressed (%1 since last shown).").arg(m_suppressedErrors),
+            3000);
+        return;
+    }
+    m_lastPresetErrorMs = now;
+
+    QString detail = (line >= 0)
         ? tr("%1\n\n(line %2)").arg(msg).arg(line)
         : msg;
+    if (m_suppressedErrors > 0) {
+        detail += tr("\n\n(%1 additional errors suppressed.)").arg(m_suppressedErrors);
+        m_suppressedErrors = 0;
+    }
     QMessageBox::warning(this, tr("Preset error"), detail);
 }
 

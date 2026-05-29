@@ -6,6 +6,8 @@
 #include <map>
 #include <memory>
 
+#include <QDateTime>
+
 #include "audio/FFTProcessor.h"   // for BandData (used in onReactivePresetBands slot)
 #include "core/AnimationTimeline.h"
 #include "core/ShapeMask.h"
@@ -181,4 +183,11 @@ private:
     // Animation mode — true while an Animation script's frames are being
     // collected into the timeline. Discriminator inside onPresetFrameReady.
     bool     m_animationMode = false;
+
+    // Error throttling — without this a misconfigured preset (e.g. an
+    // Animation loaded as a reactive Python preset, then audio started)
+    // can emit dozens of errors per second, each opening a modal dialog
+    // and effectively locking the UI thread. See onPresetError.
+    qint64   m_lastPresetErrorMs   = 0;
+    int      m_suppressedErrors    = 0;
 };
