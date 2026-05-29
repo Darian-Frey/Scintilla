@@ -2,8 +2,8 @@
 
 > **Status:** Active
 > **Provenance:** Shane Hartley (owner) · Claude (architect, prototype, documentation)
-> **Last reviewed:** 2026-05-20
-> **Why this status:** Browser prototype validated; Qt6/C++20 desktop scaffold in place (DEC-008); Phase 1 (core renderer) is the next implementation milestone.
+> **Last reviewed:** 2026-05-29
+> **Why this status:** Phases 0–8 complete — renderer, editor, audio reactive engine, Python preset + animation scripting, paint-tool polish, animation export, and the user manual are all in place. Future phases cover extended exports and shapes; see [ROADMAP.md](ROADMAP.md).
 
 A 3D LED array designer that dances to your music. Spiritual successor to the physical
 [8×8×8 LED Cube](https://github.com/Darian-Frey/LED_Cube) (2009), removing all hardware constraints — arbitrary grid sizes (3³–32³), full RGB per voxel, multiple array shapes, a frame-based animation timeline, music-reactive playback via PortAudio + KissFFT, and a Python preset scripting engine inspired by Winamp AVS.
@@ -14,18 +14,21 @@ A 3D LED array designer that dances to your music. Spiritual successor to the ph
 
 ## Features
 
-- 3D voxel viewport with orbit/pan/zoom camera
+- 3D voxel viewport with orbit/pan/zoom camera and camera-keyframe fly-throughs
 - Four LED array shapes: Cube, Sphere, Cylinder, Pyramid
 - Grid sizes 3³–32³ with instanced-mesh rendering
-- Full RGB per LED; palette + recent-history colour picker
-- Paint / Erase / Fill / Pick tools
+- Full RGB + per-LED brightness; palette + recent-history colour picker
+- Paint / Erase / Fill / Pick tools with stroke painting and X/Y/Z mirror modes
+- Undo / Redo, copy / paste across frames, right-click LED edit
 - X/Y/Z slice view for layer editing
-- Frame-based animation timeline with playback
-- JSON save/load (v1.0 wire format)
-- Music-reactive modes via PortAudio + KissFFT (planned, Phase 3)
-- Python preset scripting with hot-reload (planned, Phase 4)
+- Frame-based animation timeline with playback and FPS / mode controls
+- JSON save/load plus MP4 / GIF / WebM / PNG-sequence export via ffmpeg
+- Audio-reactive modes via PortAudio + KissFFT — 8 built-in modes plus live Python presets
+- Python preset scripting with hot-reload and in-app editor
+- Animation scripts (`cube.frame()` / `cube.play()`) for non-reactive programmatic animations
+- 20 built-in presets / animations across six visual categories
 
-See [FEATURES.md](FEATURES.md) for the full capability list with priorities and acceptance criteria.
+See [FEATURES.md](FEATURES.md) for the full capability list with priorities and acceptance criteria, and [USER_MANUAL.md](USER_MANUAL.md) for an end-user tour.
 
 ## Quick start
 
@@ -37,13 +40,13 @@ xdg-open prototype/index.html    # or open in any modern browser
 
 No build step required; the prototype is the canonical renderer reference.
 
-### Desktop build (in progress)
+### Desktop build
 
 ```bash
 # Install dependencies — see BUILD.md for per-platform details
 sudo apt install -y build-essential cmake ninja-build \
     qt6-base-dev libqt6opengl6-dev libgl1-mesa-dev \
-    portaudio19-dev python3 python3-numpy
+    portaudio19-dev python3 python3-numpy ffmpeg
 
 # Build and run
 cmake -B build -G Ninja
@@ -51,7 +54,7 @@ cmake --build build
 ./build/Scintilla
 ```
 
-The desktop build is in Phase 1 (core renderer); see [HANDOVER.md](HANDOVER.md) for the current implementation state and [ROADMAP.md](ROADMAP.md) for upcoming phases.
+`ffmpeg` is only required for animation export (MP4 / GIF / WebM). See [USER_MANUAL.md](USER_MANUAL.md) for a walkthrough of every program feature and [ROADMAP.md](ROADMAP.md) for completed and upcoming phases.
 
 ## Project structure
 
@@ -82,10 +85,12 @@ The desktop build is in Phase 1 (core renderer); see [HANDOVER.md](HANDOVER.md) 
 
 | File | Purpose |
 | --- | --- |
+| [USER_MANUAL.md](USER_MANUAL.md) | End-user tour of every program feature, keyboard shortcuts, troubleshooting |
+| [presets/INSTRUCTIONS.md](presets/INSTRUCTIONS.md) | Python preset and animation-script authoring guide |
 | [CLAUDE.md](CLAUDE.md) | AI development handoff — current state, conventions, invariants |
 | [HANDOVER.md](HANDOVER.md) | Recommended build order, missing-files inventory |
 | [FEATURES.md](FEATURES.md) | Capability list with priorities and acceptance criteria (F-NNN) |
-| [ROADMAP.md](ROADMAP.md) | Phased development plan (Phase 0 … Phase 5+) |
+| [ROADMAP.md](ROADMAP.md) | Phased development plan (Phases 0–8 complete, Phase 9+ planned) |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | System structure, module responsibilities, threading model |
 | [DECISIONS.md](DECISIONS.md) | Indexed log of design decisions (DEC-NNN), reversal conditions |
 | [BUILD.md](BUILD.md) | Toolchain, dependencies, build commands, troubleshooting |
