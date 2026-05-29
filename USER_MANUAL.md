@@ -378,10 +378,11 @@ A `●` next to the filename means the file has unsaved changes.
 
 ### Writing your own
 
-Drop new `.py` files in `presets/user/` — the program scans both
-`presets/builtin/` (read-only library) and `presets/user/` (your
-work). See [presets/INSTRUCTIONS.md](presets/INSTRUCTIONS.md) for the
-full authoring guide.
+Drop new `.py` files in `presets/user/reactive/` (audio-reactive
+presets) or `presets/user/animations/` (run-once animation scripts).
+The shipped library lives in the corresponding `presets/builtin/`
+subfolders. See [presets/INSTRUCTIONS.md](presets/INSTRUCTIONS.md)
+for the full authoring guide.
 
 ---
 

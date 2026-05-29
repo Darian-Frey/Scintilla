@@ -71,7 +71,7 @@ PortAudio + KissFFT. The defining constraint is that the PortAudio callback is r
 
 - **`PresetRunner`** — owns a `QProcess` running `python3` with the active preset. Communication is JSON over stdin/stdout: each frame the app sends an audio-feature packet, the preset emits a `VoxelFrame` JSON, the renderer consumes it.
 - **`PresetEditorPanel`** — in-app Qt editor for `.py` files, with a Python syntax highlighter, preset browser, and error console fed by stderr from `PresetRunner`.
-- **`QFileSystemWatcher`** watches `presets/builtin/` and `presets/user/` for hot-reload.
+- **`QFileSystemWatcher`** watches the currently-loaded script file for hot-reload (`PresetRunner::loadPreset` installs the watcher on the active path).
 
 ### `src/ui/` — Qt widgets
 
@@ -83,9 +83,10 @@ Thin presentation layer; widgets emit signals into `MainWindow`, which mediates 
 
 ### `presets/` — Python preset runtime
 
-- **`presets/led_cube/`** — runtime package imported by every preset (`from led_cube import Preset`). Contains the `CubeProxy` helper that wraps the LED array and the `Preset` base class.
-- **`presets/builtin/`** — shipped presets (target: 20; currently 2).
-- **`presets/user/`** — user-authored presets; scanned at startup and on filesystem change.
+- **`presets/led_cube/`** — runtime package imported by every script (`from led_cube import Preset, Animation`). Contains the `CubeProxy` helper, the `Preset` base class (audio-reactive), and the `Animation` base class (run-once).
+- **`presets/builtin/reactive/`** — 20 shipped audio-reactive presets.
+- **`presets/builtin/animations/`** — shipped run-once animation scripts.
+- **`presets/user/reactive/`** and **`presets/user/animations/`** — user-authored counterparts; each contains a `_template.py` starter.
 
 ---
 

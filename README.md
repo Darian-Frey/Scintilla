@@ -80,10 +80,14 @@ cmake --build build
 │   ├── audio/                   ← PortAudio + KissFFT pipeline
 │   ├── scripting/               ← Python preset runner (QProcess)
 │   └── ui/                      ← Qt widgets (colour picker, timeline, slice control)
-├── presets/                     ← Python preset runtime
-│   ├── led_cube/                ← preset base class + CubeProxy
-│   ├── builtin/                 ← shipped presets (target: 20)
-│   └── user/                    ← user-authored presets
+├── presets/                     ← Python scripting runtime
+│   ├── led_cube/                ← Preset/Animation base classes + CubeProxy
+│   ├── builtin/
+│   │   ├── reactive/            ← 20 shipped audio-reactive presets
+│   │   └── animations/          ← shipped run-once animation scripts
+│   └── user/
+│       ├── reactive/            ← user-authored reactive presets
+│       └── animations/          ← user-authored animation scripts
 └── prototype/index.html         ← Three.js r128 reference prototype
 ```
 

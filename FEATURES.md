@@ -218,16 +218,16 @@ Hobbyists and visual artists designing 3D LED animations — for the screen, for
 
 **Priority:** Should
 **Acceptance:**
-- 20 preset scripts in `presets/builtin/` covering the demo set in `docs/D-003-preset-scripting.md` §DEC-021.
-**Status:** 2 of 20 complete (pulse_sphere, lissajous); 18 remaining.
+- 20 reactive preset scripts in `presets/builtin/reactive/` plus shipped run-once animation scripts in `presets/builtin/animations/`, covering the demo set in `docs/D-003-preset-scripting.md` §DEC-021.
+**Status:** 20 of 20 reactive presets complete; 2 animation scripts shipped (`anim_spiral`, `anim_lorenz`).
 
 ### F-025 User preset directory
 
 **Priority:** Must (scripting milestone)
 **Acceptance:**
-- `presets/user/` is scanned at startup and on filesystem change.
-- A template (`_template.py`) is installed alongside.
-**Status:** Template in place; directory scan not yet implemented.
+- `presets/user/reactive/` and `presets/user/animations/` are the user-authored counterparts to the built-in directories.
+- A template (`_template.py` for reactive, `_animation_template.py` for animations) is installed in each.
+**Status:** Templates in place; File → New animation script… creates a fresh file from the animation template and loads it into the editor.
 
 ---
 

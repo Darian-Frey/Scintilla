@@ -10,9 +10,10 @@ This document walks through writing a new preset from scratch, the API
 your code talks to, common patterns the built-in presets use, and how
 to debug a misbehaving preset.
 
-If you just want a starting point, copy [user/_template.py](user/_template.py)
-to a new file in [user/](user/) and edit it. The rest of this document
-explains what's in there and why.
+If you just want a starting point, copy one of the templates in
+[user/reactive/](user/reactive/) or [user/animations/](user/animations/)
+to a new file alongside it and edit. The rest of this document explains
+what's in there and why.
 
 ---
 
@@ -38,10 +39,10 @@ class MyPreset(Preset):
         cube.set_hsv(self.hue, 1.0, audio.bass)
 ```
 
-Save it as `presets/user/my_preset.py`, open it via the Audio reactive
-panel's **Load preset…** button (with reactive mode set to **Python
-preset**), and Scintilla will start streaming live audio into it. Save
-your edits in the in-app editor and the preset hot-reloads.
+Save it as `presets/user/reactive/my_preset.py`, open it via the Audio
+reactive panel's **Load preset…** button (with reactive mode set to
+**Python preset**), and Scintilla will start streaming live audio into
+it. Save your edits in the in-app editor and the preset hot-reloads.
 
 ---
 
@@ -49,24 +50,36 @@ your edits in the in-app editor and the preset hot-reloads.
 
 ```
 presets/
-├── builtin/        Read-only library shipped with Scintilla
-├── user/           Drop your own presets here
-│   └── _template.py
-└── led_cube/       Runtime (do not edit)
+├── builtin/
+│   ├── reactive/        20 shipped audio-reactive presets
+│   └── animations/      shipped run-once animation scripts
+├── user/
+│   ├── reactive/        drop your own reactive presets here
+│   │   └── _template.py
+│   └── animations/      drop your own animation scripts here
+│       └── _animation_template.py
+└── led_cube/            runtime (do not edit)
 ```
 
-Files starting with `_` are excluded from the preset browser (e.g.
-`_template.py` is a template, not a preset).
+Files starting with `_` are excluded from the preset browser (so the
+templates don't show up as runnable entries).
 
-A preset file must:
+A reactive **Preset** file must:
 
 - import `Preset` from `led_cube`
 - define exactly one class that subclasses `Preset`
 - (optionally) set class attributes `name`, `description`, `author`, `tags`
 
-The runtime imports the file, finds the `Preset` subclass, and
-instantiates it. Anything else in the file (helper functions, module
-constants, other classes) is fine and ignored.
+A run-once **Animation** file must:
+
+- import `Animation` from `led_cube`
+- define exactly one class that subclasses `Animation`
+- implement `run(self, cube)` — emit frames via `cube.frame()`, then
+  call `cube.play(fps)` once at the end
+
+The runtime imports the file, finds whichever subclass it can, and
+runs the matching protocol. Anything else in the file (helper
+functions, module constants, other classes) is fine and ignored.
 
 ---
 
@@ -310,11 +323,13 @@ def on_frame(self, cube, audio):
 
 ## Where to look next
 
-- [user/_template.py](user/_template.py) — minimal scaffold
-- [builtin/](builtin/) — twenty working presets across six visual categories
+- [user/reactive/_template.py](user/reactive/_template.py) — reactive-preset scaffold
+- [user/animations/_animation_template.py](user/animations/_animation_template.py) — animation-script scaffold
+- [builtin/reactive/](builtin/reactive/) — twenty working presets across six visual categories
+- [builtin/animations/](builtin/animations/) — shipped run-once animation scripts
 - [led_cube/_cube_proxy.py](led_cube/_cube_proxy.py) — the CubeProxy
   implementation if you want to know exactly what each method does
-- [led_cube/_runner.py](led_cube/_runner.py) — the audio frame /
+- [led_cube/_runner.py](led_cube/_runner.py) — wire-protocol runner and
   AudioFrame class definition
 
 Read a built-in preset close to what you want to make and adapt it.

@@ -1035,7 +1035,7 @@ void MainWindow::onRunPreset() {
     }
 
     const QString defaultDir = QDir(QCoreApplication::applicationDirPath())
-                                   .absoluteFilePath(QStringLiteral("../presets"));
+                                   .absoluteFilePath(QStringLiteral("../presets/builtin/reactive"));
     const QString path = QFileDialog::getOpenFileName(
         this, tr("Run preset"), defaultDir,
         tr("Python presets (*.py)"));
@@ -1212,7 +1212,7 @@ void MainWindow::ensurePresetRunner() {
 
 void MainWindow::onRunAnimationScript() {
     const QString defaultDir = QDir(QCoreApplication::applicationDirPath())
-                                   .absoluteFilePath(QStringLiteral("../presets"));
+                                   .absoluteFilePath(QStringLiteral("../presets/builtin/animations"));
     const QString path = QFileDialog::getOpenFileName(
         this, tr("Run animation script"), defaultDir,
         tr("Python animation (*.py)"));
@@ -1229,13 +1229,13 @@ void MainWindow::onNewAnimationScript() {
              QCoreApplication::applicationDirPath() + QStringLiteral("/../presets"),
              QDir::currentPath() + QStringLiteral("/presets"),
          }) {
-        const QString candidate = base + QStringLiteral("/user/_animation_template.py");
+        const QString candidate = base + QStringLiteral("/user/animations/_animation_template.py");
         if (QFileInfo(candidate).exists()) { templatePath = candidate; break; }
     }
     if (templatePath.isEmpty()) {
         QMessageBox::warning(this, tr("Template missing"),
-            tr("Could not find presets/user/_animation_template.py next to "
-               "the binary. Reinstall to restore the bundled templates."));
+            tr("Could not find presets/user/animations/_animation_template.py next "
+               "to the binary. Reinstall to restore the bundled templates."));
         return;
     }
 
@@ -1334,7 +1334,7 @@ void MainWindow::onAnimationComplete(int fps) {
 
 void MainWindow::onLoadReactivePreset() {
     const QString defaultDir = QDir(QCoreApplication::applicationDirPath())
-                                   .absoluteFilePath(QStringLiteral("../presets"));
+                                   .absoluteFilePath(QStringLiteral("../presets/builtin/reactive"));
     const QString path = QFileDialog::getOpenFileName(
         this, tr("Load reactive preset"), defaultDir,
         tr("Python presets (*.py)"));
