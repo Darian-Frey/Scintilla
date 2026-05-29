@@ -20,6 +20,28 @@ that landed before the document existed.
 
 ## Suggested
 
+### IMP-011: WebM export feeds H.264 encoder args into a WebM container
+
+**Status:** suggested
+**Found:** 2026-05-23 (during the Phase 7 export pipeline implementation; flagged in the ROADMAP "loose ends" section but not previously logged)
+**Location:** [src/MainWindow.cpp](src/MainWindow.cpp) — `onExportAnimation`, the ffmpeg args branch
+**Effort:** small
+**Description.** The export pipeline branches by output extension into GIF (palettegen filter) and "video" (H.264 + yuv420p + CRF 20) paths. The video path is used for both `.mp4` and `.webm` outputs. ffmpeg silently picks a codec compatible with the WebM container (VP9 in modern builds), so the file is playable, but the CRF range and pixel format aren't optimal for VP9 and the user pays a noticeable file-size penalty.
+**Proposal.** Add a third branch matching `.webm` and use `-c:v libvpx-vp9 -crf 30 -b:v 0 -pix_fmt yuv420p` (or `yuv420p10le` for 10-bit). Optionally `-cpu-used 4` for a faster encode at slight quality cost. Detection is a one-line `path.endsWith(".webm", Qt::CaseInsensitive)` alongside the existing `isGif` check.
+**Trade-offs.** Three or four extra lines of dispatch. WebM exports become semantically correct and produce smaller files for equivalent visual quality. No effect on MP4/GIF paths.
+**Notes.** Current behaviour produces a working WebM via ffmpeg's default-codec choice, so this isn't broken — just suboptimal. Worth doing when WebM export gets meaningful use, or as a quick polish alongside any other export pipeline change.
+
+### IMP-010: Fill tool not wrapped in `VoxelStrokeCommand` — bulk fills skip the undo stack
+
+**Status:** suggested
+**Found:** 2026-05-23 (during the stroke painting + undo work; flagged in the ROADMAP "loose ends" section but not previously logged)
+**Location:** [src/renderer/CubeViewport.cpp](src/renderer/CubeViewport.cpp) — `applyTool`, `Tool::Fill` case
+**Effort:** small
+**Description.** The Phase 6 stroke painting + undo work wrapped Paint and Erase mutations in `VoxelStrokeCommand` so each stroke is one undoable step. The Fill tool was left as a direct frame mutation. As a result Ctrl+Z cannot undo a Fill — by far the most destructive single click in the tool palette.
+**Proposal.** In the Fill branch, iterate the target voxels (already done for the mutation), build a `VoxelStroke` with one `VoxelChange` per modified voxel capturing the pre-edit and post-edit colours, push as a `VoxelStrokeCommand`. The pattern is exactly what `applyToolStroke` does, just executed in one click instead of incrementally.
+**Trade-offs.** At the 32³ grid cap a Fill stroke records up to 32 768 changes — large but compressible and well within the 200-entry stack limit. Memory is bounded.
+**Notes.** Should also respect the active slice (Fill already does) so the captured stroke matches what got painted. After implementation the Fill tool gets first-class undo / redo for free.
+
 ### IMP-005: Spatial index for ray-pick instead of O(N) linear scan
 
 **Status:** suggested

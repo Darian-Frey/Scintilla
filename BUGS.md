@@ -19,6 +19,41 @@ and resolved before the document existed.
 
 ## Fixed
 
+### BUG-017: LED shader washed dim colours to near-white at the front-facing centre
+
+**Status:** fixed (2026-05-30, in `f545f41`)
+**Found:** 2026-05-30 (interactive verification of the per-LED brightness slider — Shane painted five LEDs at 100/75/50/25/0 % red and observed only marginal brightness differences with a near-white core on all of them)
+**Location:** [src/renderer/shaders/led.frag](src/renderer/shaders/led.frag) `main()`
+**Severity:** medium (visual fidelity — dim LEDs didn't read as dim)
+**Description.** The Fresnel-glow fragment shader produced the hot-die look by mixing `vColor` toward `vec3(1.8)` with strength `core * 0.9` at the front-facing centre. The white mix target was constant regardless of `vColor`'s magnitude, so dim colours like `vec3(0.25, 0, 0)` (25 %-bright red) ended up almost pure white at the centre. Brightness gradients were visually indistinguishable.
+**Reproduction.** Paint a row of voxels at 25 / 50 / 75 / 100 % red. All four render with similar white-cored hot spots; the brightness signal is invisible.
+**Notes.** Scaled both the white target and the mix factor by `ledBrightness = max(R, G, B)`: full-bright LEDs keep the hot-die look, dim ones preserve their colour identity. Also scaled the intensity envelope (`dome*0.85 + core*1.6`) by `ledBrightness` so dim LEDs are perceptibly less bright in addition to keeping their hue. Paired with BUG-016's paint-as-erase routing so the brightness=0 case is genuinely off rather than rendering as a black-lit cell.
+
+### BUG-016: Painting RGB (0,0,0) stored as a "lit" black voxel rendered with a white Fresnel rim
+
+**Status:** fixed (2026-05-30, in `f545f41`)
+**Found:** 2026-05-30 (same interactive session as BUG-017 — the brightness-0 LED looked white, not off)
+**Location:** [src/renderer/CubeViewport.cpp](src/renderer/CubeViewport.cpp) `applyToolStroke`
+**Severity:** medium (rendering surprise — user expected (0,0,0) to mean "off")
+**Description.** `VoxelFrame::set` stored `(0,0,0)` as a lit voxel of black, and the Fresnel-glow shader rendered any lit voxel with a white-tinted core regardless of vColor magnitude. So painting black left an LED visibly glowing instead of going dark. The brightness slider at 0 % emits `(0,0,0)` to the viewport, putting the issue front-and-centre.
+**Reproduction.** Set R/G/B sliders all to zero (or brightness slider to 0 %), click a voxel. The LED lights up as a white-edged sphere instead of going off.
+**Notes.** Fixed by detecting `m_paintColor == (0,0,0)` in `applyToolStroke` and routing the change through the erase path so the voxel disappears from the frame instead of being stored as a black-lit cell. Mirror copies inherit the same treatment. The shader fix in BUG-017 also reduces the symptom for any leftover edge cases — even if a black-lit cell does slip through, ledBrightness=0 now scales the centre and envelope to zero.
+
+### BUG-015: Animation script loaded into Python-preset reactive mode floods UI with modal dialogs
+
+**Status:** fixed (2026-05-30, in `11d95aa`)
+**Found:** 2026-05-30 (Shane: "I set audio reactive mode to Python Preset and then loaded anim_lorenz.py then I set the audio input and a lot of error messages came up, the program glitched out and everything froze")
+**Location:** [src/MainWindow.cpp](src/MainWindow.cpp) `onPresetError`, `onLoadReactivePreset`, `runAnimationScript`, `onRunPreset`
+**Severity:** high (full UI lockup, system became unresponsive enough to require external intervention)
+**Description.** The Python runtime accepts two script types — `Preset` (reactive, driven by per-frame audio bands) and `Animation` (run-once, emits frames via `cube.frame()`). The `Run preset` / `Load preset` flows both spawn a subprocess that expects to receive `frame` messages each audio frame; the runner explicitly rejects `frame` messages when the loaded script is an `Animation`. With audio enabled and an Animation loaded as a reactive preset, the audio engine emitted band updates at ~60 Hz, MainWindow pushed each one to the runner, the runner replied with `{"type":"error","message":"frame received in animation mode (script already finished)"}` per push, and `onPresetError` opened a modal `QMessageBox::warning` for each error. At 60 dialogs per second the UI thread saturated and the system locked up — the audio thread kept pumping, so the loop didn't self-resolve.
+**Reproduction.** Pre-fix build: Audio reactive panel → set Reactive: Python preset → Load preset… → pick `presets/builtin/animations/anim_lorenz.py` → Audio → Select input device → pick any monitor source. The Lorenz animation runs once, then a flood of "Preset error" modals begins and the UI freezes.
+**Notes.** Two-layer fix:
+
+  1. **Up-front detection.** A new `detectScriptType()` helper in MainWindow regex-scans the file for `class X(Animation)` vs `class X(Preset)` before starting the subprocess. `onLoadReactivePreset` and `onRunPreset` refuse Animation files with a clear "use File → Run animation script…" message; `runAnimationScript` refuses Preset files. `onRunPreset` also auto-reroutes Animation files through the animation path.
+  2. **Error throttle + auto-stop.** `onPresetError` now (a) stops the audio engine immediately if it's running in PythonPreset mode when an error arrives, breaking the bands → frame → error feedback loop, and (b) caps modal dialogs at one per 5 seconds. Suppressed errors are counted and reported in the status bar; the next dialog appends "(N additional errors suppressed.)".
+
+  The detection covers the common cause; the throttle is a safety net for any future path that might leak per-frame errors.
+
 ### BUG-014: Source-output matcher used `application.process.id`, which `pcm.pipewire` doesn't set
 
 **Status:** fixed (2026-05-22, this session)
