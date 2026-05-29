@@ -295,6 +295,11 @@ void PresetRunner::onProcessOutput() {
             }
             emit frameReady(std::move(frame));
         }
+        else if (type == QLatin1String("play")) {
+            const int fps = obj.value(QStringLiteral("fps")).toInt(12);
+            qDebug() << "[preset] animation complete — fps:" << fps;
+            emit animationComplete(fps);
+        }
         else if (type == QLatin1String("error")) {
             const QString msg  = obj.value(QStringLiteral("message")).toString();
             const int     line = obj.value(QStringLiteral("line")).toInt(-1);

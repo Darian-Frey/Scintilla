@@ -1,6 +1,9 @@
 #include "CubeViewport.h"
 
+#include <QAction>
+#include <QColorDialog>
 #include <QDebug>
+#include <QMenu>
 #include <QMouseEvent>
 #include <QWheelEvent>
 #include <algorithm>
@@ -273,6 +276,12 @@ void CubeViewport::mouseReleaseEvent(QMouseEvent* e) {
         const int idx = pickInstance(e->pos());
         if (idx >= 0)        applyTool(idx);   // Pick / Fill only — Paint/Erase went through stroke path
         else                 emit pickRayMiss();
+    }
+    if (!m_dragging && e->button() == Qt::RightButton) {
+        // Right-click on a lit voxel opens an edit / clear menu. Right-drag
+        // is reserved for orbit and falls through this branch via m_dragging.
+        const int idx = pickInstance(e->pos());
+        if (idx >= 0) showVoxelContextMenu(idx, e->globalPosition().toPoint());
     }
     m_dragging  = false;
     m_shiftDrag = false;
@@ -671,7 +680,16 @@ void CubeViewport::applyToolStroke(int instanceIdx) {
         ch.x = k.x; ch.y = k.y; ch.z = k.z;
         if (cur) { ch.hadValue = true; ch.oldValue = *cur; }
 
-        if (m_tool == Tool::Paint) {
+        // Painting (0,0,0) is semantically "no light" — route it through the
+        // erase path so the voxel disappears rather than being stored as a
+        // black cell that the Fresnel-glow shader still renders.
+        const bool paintAsErase =
+            (m_tool == Tool::Paint) && m_paintColor[0] == 0
+                                    && m_paintColor[1] == 0
+                                    && m_paintColor[2] == 0;
+        const bool erasing = (m_tool == Tool::Erase) || paintAsErase;
+
+        if (!erasing) {
             if (cur && (*cur)[0] == m_paintColor[0]
                     && (*cur)[1] == m_paintColor[1]
                     && (*cur)[2] == m_paintColor[2]) continue;
@@ -681,7 +699,7 @@ void CubeViewport::applyToolStroke(int instanceIdx) {
             ch.newValue      = m_paintColor;
             emit voxelEdited(k.x, k.y, k.z,
                              m_paintColor[0], m_paintColor[1], m_paintColor[2], false);
-        } else {   // Tool::Erase
+        } else {
             if (!cur) continue;
             frame.erase(k.x, k.y, k.z);
             ch.willHaveValue = false;
@@ -692,4 +710,56 @@ void CubeViewport::applyToolStroke(int instanceIdx) {
     }
 
     if (changed) m_timeline->notifyCurrentFrameEdited();
+}
+
+void CubeViewport::showVoxelContextMenu(int instanceIdx, QPoint globalPos) {
+    if (!m_mask || !m_timeline) return;
+    if (instanceIdx < 0
+        || static_cast<size_t>(instanceIdx) >= m_mask->positions().size()) return;
+
+    const VoxelKey k = m_mask->positions()[static_cast<size_t>(instanceIdx)];
+    const auto cur = m_timeline->currentFrame().get(k.x, k.y, k.z);
+    if (!cur) return;   // only show the menu for lit voxels
+
+    QMenu menu(this);
+    auto* editAct  = menu.addAction(tr("Edit colour…"));
+    auto* clearAct = menu.addAction(tr("Clear"));
+    QAction* chosen = menu.exec(globalPos);
+    if (!chosen) return;
+
+    // Build a one-voxel stroke so the change is undoable.
+    VoxelStroke stroke;
+    stroke.frameIndex = m_timeline->currentIndex();
+    VoxelChange ch{};
+    ch.x = k.x; ch.y = k.y; ch.z = k.z;
+    ch.hadValue  = true;
+    ch.oldValue  = *cur;
+
+    auto& frame = m_timeline->currentFrame();
+
+    if (chosen == editAct) {
+        const QColor src((*cur)[0], (*cur)[1], (*cur)[2]);
+        const QColor picked = QColorDialog::getColor(
+            src, this, tr("Edit voxel colour"));
+        if (!picked.isValid()) return;
+        ch.willHaveValue = true;
+        ch.newValue = {
+            static_cast<uint8_t>(picked.red()),
+            static_cast<uint8_t>(picked.green()),
+            static_cast<uint8_t>(picked.blue())
+        };
+        frame.set(k.x, k.y, k.z, ch.newValue[0], ch.newValue[1], ch.newValue[2]);
+        emit voxelEdited(k.x, k.y, k.z,
+                         ch.newValue[0], ch.newValue[1], ch.newValue[2], false);
+    } else if (chosen == clearAct) {
+        ch.willHaveValue = false;
+        frame.erase(k.x, k.y, k.z);
+        emit voxelEdited(k.x, k.y, k.z, 0, 0, 0, true);
+    } else {
+        return;
+    }
+
+    stroke.changes.push_back(ch);
+    m_timeline->notifyCurrentFrameEdited();
+    emit strokeCommitted(std::move(stroke));
 }

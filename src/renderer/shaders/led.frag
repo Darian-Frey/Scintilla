@@ -42,13 +42,25 @@ void main() {
     // Wider but still front-biased dome glow
     float dome = pow(NdotV, 2.0);
 
-    // Centre washes toward white; edges keep the LED's colour
-    vec3 hot = mix(vColor, vec3(1.8), core * 0.9);
+    // The LED's own brightness — used so dim colours look dim rather than
+    // washing out to white at the centre, and so unlit (0,0,0) cells
+    // genuinely emit nothing.
+    float ledBrightness = max(max(vColor.r, vColor.g), vColor.b);
 
-    // Intensity envelope: bright at centre, soft at the rim
-    float intensity = dome * 0.85 + core * 1.6;
+    // Centre washes toward white at high brightness; at low brightness
+    // both the white target and the mix factor scale down so the colour
+    // identity survives.
+    vec3 hot = mix(vColor,
+                   vec3(1.8) * ledBrightness,
+                   core * 0.9 * ledBrightness);
 
-    // Emissive base so the LED looks self-lit even when behind shadows
+    // Intensity envelope: bright at centre, soft at the rim. Scaled by
+    // brightness so a 25 %-red LED genuinely looks ~25 % as bright as full
+    // red rather than the same with a tinted rim.
+    float intensity = (dome * 0.85 + core * 1.6) * ledBrightness;
+
+    // Emissive base — already scaled by vColor, so dim colours naturally
+    // contribute less.
     vec3 emissive = vColor * 0.45;
 
     vec3 finalColor = emissive + hot * intensity;

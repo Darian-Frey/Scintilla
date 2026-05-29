@@ -9,31 +9,41 @@ Invocation:
 Wire protocol — one JSON message per line, both directions. Matches the
 contract declared by src/scripting/PresetRunner.h.
 
-App → preset (stdin):
+The runner handles two script types, detected from which base class the
+user file inherits:
+
+  - Preset: reactive — receives an audio frame each render frame and
+    paints the cube in response.
+  - Animation: run-once — script runs to completion at load time,
+    emitting frames via cube.frame() and finalising with cube.play(fps).
+
+App → script (stdin):
 
     {"type": "load",
      "cube": {"grid_size": N,
               "shape": "cube|sphere|cylinder|pyramid",
               "positions": [[x, y, z], ...]}}
-        Sent once at startup. `positions` is the world-space LED layout in
-        the shape mask; if absent, the runner falls back to the full N³
-        cube grid for testing convenience.
+        Sent once at startup. For Animation scripts this also triggers
+        run(). `positions` is the world-space LED layout in the shape
+        mask; if absent, the runner falls back to the full N³ cube grid.
 
     {"type": "frame",
      "audio": {"bands": [f, ...],     // length = grid_size
                "rms": f,
                "centroid": f,
                "beat": bool}}
-        Sent every render frame.
+        Sent every render frame. Only meaningful for Preset scripts.
 
     {"type": "unload"}
         Optional graceful shutdown. The runner exits when stdin closes too.
 
-Preset → app (stdout):
+Script → app (stdout):
 
     {"type": "ready", "name": "..."}              // after load succeeds
     {"type": "frame", "voxels": {"x,y,z": [r, g, b], ...}}
-                                                  // sparse, after each frame
+                                                  // sparse, one per frame
+    {"type": "play",  "fps": N}                   // animation finished — host
+                                                  // should play at this fps
     {"type": "error", "message": "...", "line": -1}   // on exception
 """
 
@@ -44,11 +54,10 @@ import json
 import sys
 import time
 import traceback
-from typing import Type
 
 import numpy as np
 
-from . import Preset
+from . import Preset, Animation
 from ._cube_proxy import CubeProxy
 
 
@@ -89,18 +98,24 @@ class AudioFrame:
 # ── Loading the user's preset module ─────────────────────────────────────────
 
 
-def _load_preset_class(path: str) -> Type[Preset]:
-    """Import a preset .py and return its single Preset subclass."""
-    spec = importlib.util.spec_from_file_location("scintilla_user_preset", path)
+def _load_script_class(path: str):
+    """Import a script .py and return its Preset or Animation subclass.
+
+    The caller decides which protocol to run based on which base class
+    the returned class inherits from.
+    """
+    spec = importlib.util.spec_from_file_location("scintilla_user_script", path)
     if spec is None or spec.loader is None:
-        raise RuntimeError(f"Could not import preset at {path}")
+        raise RuntimeError(f"Could not import script at {path}")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
 
     for value in vars(module).values():
-        if isinstance(value, type) and issubclass(value, Preset) and value is not Preset:
+        if not isinstance(value, type): continue
+        if value is Preset or value is Animation:    continue
+        if issubclass(value, (Preset, Animation)):
             return value
-    raise RuntimeError(f"No Preset subclass found in {path}")
+    raise RuntimeError(f"No Preset or Animation subclass found in {path}")
 
 
 # ── Wire-protocol helpers ────────────────────────────────────────────────────
@@ -139,22 +154,45 @@ def _build_cube(load_msg: dict) -> CubeProxy:
 # ── Main message loop ────────────────────────────────────────────────────────
 
 
+def _run_animation(animation: Animation, cube: CubeProxy) -> None:
+    """Wire cube.frame() / cube.play() to stdout and run the script.
+
+    cube.frame()      → emits {"type": "frame", "voxels": {...}}
+    cube.play(fps)    → emits {"type": "play",  "fps": fps}
+
+    The script normally returns shortly after cube.play(). The runner
+    then waits for stdin to close (unload) before exiting so the host
+    can collect all frames cleanly.
+    """
+    def _emit_frame(voxels):
+        _write({"type": "frame", "voxels": voxels})
+
+    def _emit_play(fps):
+        _write({"type": "play", "fps": int(fps)})
+
+    cube._on_frame_callback = _emit_frame
+    cube._on_play_callback  = _emit_play
+    animation.run(cube)
+
+
 def main(argv: list[str]) -> int:
     if len(argv) < 2:
-        _write({"type": "error", "message": "usage: led_cube._runner <preset.py>"})
+        _write({"type": "error", "message": "usage: led_cube._runner <script.py>"})
         return 2
 
-    preset_path = argv[1]
+    script_path = argv[1]
 
     try:
-        preset_cls = _load_preset_class(preset_path)
+        script_cls = _load_script_class(script_path)
     except Exception:
         _write({"type": "error", "message": f"load failed: {traceback.format_exc()}"})
         return 1
 
-    cube:       CubeProxy | None = None
-    preset:     Preset    | None = None
-    start_time: float     | None = None
+    is_animation = issubclass(script_cls, Animation)
+
+    cube:       CubeProxy | None  = None
+    instance:   object    | None  = None
+    start_time: float     | None  = None
 
     for line in sys.stdin:
         try:
@@ -167,19 +205,37 @@ def main(argv: list[str]) -> int:
 
         if mtype == "load":
             try:
-                cube       = _build_cube(msg)
-                preset     = preset_cls()
-                preset.on_load(cube)
-                start_time = time.monotonic()
-                _write({"type": "ready",
-                        "name": getattr(preset_cls, "name", "Preset")})
+                cube     = _build_cube(msg)
+                instance = script_cls()
+                if is_animation:
+                    _write({"type": "ready",
+                            "name": getattr(script_cls, "name", "Animation")})
+                    _run_animation(instance, cube)
+                    # Script has emitted everything it intends to; stay alive
+                    # for the host to send unload (or close stdin).
+                else:
+                    instance.on_load(cube)
+                    start_time = time.monotonic()
+                    _write({"type": "ready",
+                            "name": getattr(script_cls, "name", "Preset")})
             except Exception:
                 _write({"type":    "error",
-                        "message": f"on_load failed: {traceback.format_exc()}",
+                        "message": f"{'run' if is_animation else 'on_load'} failed: "
+                                   f"{traceback.format_exc()}",
                         "line":    -1})
 
         elif mtype == "frame":
-            if cube is None or preset is None or start_time is None:
+            if cube is None or instance is None:
+                _write({"type": "error", "message": "frame received before load", "line": -1})
+                continue
+            if is_animation:
+                # Animation already ran to completion; further frame requests
+                # are no-ops. Surface this rather than silently ignore.
+                _write({"type": "error",
+                        "message": "frame received in animation mode (script already finished)",
+                        "line":    -1})
+                continue
+            if start_time is None:
                 _write({"type": "error", "message": "frame received before load", "line": -1})
                 continue
             try:
@@ -193,8 +249,8 @@ def main(argv: list[str]) -> int:
 
                 cube._begin_frame()
                 if beat:
-                    preset.on_beat(cube, audio)
-                preset.on_frame(cube, audio)
+                    instance.on_beat(cube, audio)
+                instance.on_frame(cube, audio)
 
                 _write({"type": "frame", "voxels": cube._serialise()})
             except Exception:

@@ -30,6 +30,15 @@ void PresetEditorPanel::buildLayout() {
     m_pathLabel->setTextInteractionFlags(Qt::TextSelectableByMouse);
     header->addWidget(m_pathLabel, 1);
 
+    m_runButton = new QPushButton(tr("Run"), this);
+    m_runButton->setToolTip(
+        tr("Run the script as an animation. The timeline is cleared and "
+           "filled with the frames the script emits via cube.frame()."));
+    connect(m_runButton, &QPushButton::clicked, this, [this]() {
+        if (!m_path.isEmpty()) emit runRequested(m_path);
+    });
+    header->addWidget(m_runButton);
+
     m_saveButton = new QPushButton(tr("Save"), this);
     m_saveButton->setShortcut(QKeySequence::Save);
     m_saveButton->setToolTip(tr("Save the preset back to disk. The runner's "
@@ -56,6 +65,7 @@ void PresetEditorPanel::buildLayout() {
     // Disabled until a preset is loaded.
     m_editor->setEnabled(false);
     m_saveButton->setEnabled(false);
+    m_runButton->setEnabled(false);
 }
 
 void PresetEditorPanel::loadFile(const QString& path) {
@@ -83,6 +93,7 @@ void PresetEditorPanel::loadFile(const QString& path) {
     setDirty(false);
     m_editor->setEnabled(true);
     m_saveButton->setEnabled(true);
+    m_runButton->setEnabled(true);
     refreshHeader();
 }
 
@@ -94,6 +105,7 @@ void PresetEditorPanel::clearFile() {
     setDirty(false);
     m_editor->setEnabled(false);
     m_saveButton->setEnabled(false);
+    m_runButton->setEnabled(false);
     refreshHeader();
 }
 

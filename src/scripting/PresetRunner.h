@@ -52,6 +52,10 @@ signals:
     void presetUnloaded();
     void hotReloaded();
 
+    // Emitted when an Animation script finishes by calling cube.play(fps).
+    // Listeners use the fps to set the timeline's playback rate.
+    void animationComplete(int fps);
+
 private slots:
     void onProcessOutput();
     void onProcessError();

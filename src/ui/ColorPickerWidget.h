@@ -8,6 +8,7 @@
 #include "core/VoxelFrame.h"     // RGB
 
 class QSlider;
+class QSpinBox;
 class QLabel;
 class QLineEdit;
 class QPushButton;
@@ -45,17 +46,20 @@ private:
     void emitChanged();
     void pushHistory(RGB color);
 
-    RGB              m_color   = {255, 64, 32};
+    RGB              m_color   = {255, 64, 32};  // base colour (pre-brightness)
+    int              m_brightness = 100;          // 0..100 percent
     std::vector<RGB> m_history;
 
-    QSlider*    m_rSlider = nullptr;
-    QSlider*    m_gSlider = nullptr;
-    QSlider*    m_bSlider = nullptr;
-    QLabel*     m_rLabel  = nullptr;
-    QLabel*     m_gLabel  = nullptr;
-    QLabel*     m_bLabel  = nullptr;
-    QLineEdit*  m_hexEdit = nullptr;
-    QLabel*     m_preview = nullptr;
+    QSlider*    m_rSlider      = nullptr;
+    QSlider*    m_gSlider      = nullptr;
+    QSlider*    m_bSlider      = nullptr;
+    QSlider*    m_brightSlider = nullptr;
+    QLabel*     m_rLabel       = nullptr;
+    QLabel*     m_gLabel       = nullptr;
+    QLabel*     m_bLabel       = nullptr;
+    QSpinBox*   m_brightSpin   = nullptr;
+    QLineEdit*  m_hexEdit      = nullptr;
+    QLabel*     m_preview      = nullptr;
     std::vector<QPushButton*> m_paletteBtns;
     std::vector<QPushButton*> m_historyBtns;
 };

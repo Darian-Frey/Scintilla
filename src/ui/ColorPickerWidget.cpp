@@ -8,6 +8,7 @@
 #include <QRegularExpression>
 #include <QRegularExpressionValidator>
 #include <QSlider>
+#include <QSpinBox>
 #include <QVBoxLayout>
 #include <algorithm>
 
@@ -36,6 +37,16 @@ QString hexOf(RGB c) {
 
 QString swatchStyle(RGB c) {
     return QString("background:%1; border:1px solid #222;").arg(hexOf(c));
+}
+
+// Scale a base RGB by a percentage brightness 0..100. The clamp is
+// inherited from the integer division below, so no explicit guards needed.
+RGB scaleBrightness(RGB c, int pct) {
+    return {
+        static_cast<uint8_t>(c[0] * pct / 100),
+        static_cast<uint8_t>(c[1] * pct / 100),
+        static_cast<uint8_t>(c[2] * pct / 100),
+    };
 }
 
 }  // namespace
@@ -86,6 +97,51 @@ void ColorPickerWidget::buildLayout() {
     sliderRow(tr("G"), m_gSlider, m_gLabel);
     sliderRow(tr("B"), m_bSlider, m_bLabel);
 
+    // Brightness — multiplier applied to the base RGB before emit. The hex
+    // and R/G/B sliders always show the BASE colour; the preview swatch
+    // shows the dimmed result that's actually emitted to the viewport.
+    // The QSpinBox alongside the slider is the precise-entry path — pixel
+    // resolution on a short slider can otherwise skip individual values.
+    {
+        auto* row = new QHBoxLayout();
+        row->addWidget(new QLabel(tr("Brightness"), this));
+        m_brightSlider = new QSlider(Qt::Horizontal, this);
+        m_brightSlider->setRange(0, 100);
+        m_brightSlider->setValue(100);
+        m_brightSlider->setSingleStep(1);
+        m_brightSlider->setPageStep(10);
+        m_brightSlider->setToolTip(
+            tr("Scales the paint colour. 100%% = full, 50%% = half, 0%% = off. "
+               "Use the spinbox to type an exact value."));
+        connect(m_brightSlider, &QSlider::valueChanged, this, [this](int v) {
+            if (m_brightness == v) return;
+            m_brightness = v;
+            QSignalBlocker blk(m_brightSpin);
+            m_brightSpin->setValue(v);
+            applyColorToUi();
+            emitChanged();
+        });
+        row->addWidget(m_brightSlider, 1);
+
+        m_brightSpin = new QSpinBox(this);
+        m_brightSpin->setRange(0, 100);
+        m_brightSpin->setValue(100);
+        m_brightSpin->setSuffix(QStringLiteral("%"));
+        m_brightSpin->setMinimumWidth(60);
+        m_brightSpin->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+        m_brightSpin->setToolTip(tr("Type an exact brightness percentage 0–100."));
+        connect(m_brightSpin, qOverload<int>(&QSpinBox::valueChanged), this, [this](int v) {
+            if (m_brightness == v) return;
+            m_brightness = v;
+            QSignalBlocker blk(m_brightSlider);
+            m_brightSlider->setValue(v);
+            applyColorToUi();
+            emitChanged();
+        });
+        row->addWidget(m_brightSpin);
+        root->addLayout(row);
+    }
+
     // Palette
     root->addWidget(new QLabel(tr("Palette"), this));
     auto* paletteGrid = new QGridLayout();
@@ -131,8 +187,13 @@ void ColorPickerWidget::buildHistory(QGridLayout* into) {
 // ── External API ─────────────────────────────────────────────────────────────
 
 void ColorPickerWidget::setCurrentColor(uint8_t r, uint8_t g, uint8_t b) {
-    if (m_color[0] == r && m_color[1] == g && m_color[2] == b) return;
+    if (m_color[0] == r && m_color[1] == g && m_color[2] == b && m_brightness == 100) return;
+    // Picked colour is whatever's currently visible on the LED. Reset the
+    // brightness slider so "what you sampled is what you paint" — without
+    // this, picking a half-bright cell while the slider is at 50% would
+    // emit a quarter-bright value on the next stroke.
     m_color = {r, g, b};
+    m_brightness = 100;
     pushHistory(m_color);
     applyColorToUi();
     // No emitChanged() — pick-tool callers don't want a feedback loop.
@@ -150,7 +211,7 @@ void ColorPickerWidget::onSliderChanged() {
     m_gLabel->setText(QString::number(m_color[1]));
     m_bLabel->setText(QString::number(m_color[2]));
     m_hexEdit->setText(hexOf(m_color));
-    m_preview->setStyleSheet(swatchStyle(m_color));
+    m_preview->setStyleSheet(swatchStyle(scaleBrightness(m_color, m_brightness)));
     emitChanged();
 }
 
@@ -191,15 +252,18 @@ void ColorPickerWidget::applyColorToUi() {
     QSignalBlocker bg(m_gSlider);
     QSignalBlocker bb(m_bSlider);
     QSignalBlocker bh(m_hexEdit);
+    QSignalBlocker bx(m_brightSlider);
 
     m_rSlider->setValue(m_color[0]);
     m_gSlider->setValue(m_color[1]);
     m_bSlider->setValue(m_color[2]);
+    m_brightSlider->setValue(m_brightness);
     m_rLabel->setText(QString::number(m_color[0]));
     m_gLabel->setText(QString::number(m_color[1]));
     m_bLabel->setText(QString::number(m_color[2]));
+    { QSignalBlocker bsp(m_brightSpin); m_brightSpin->setValue(m_brightness); }
     m_hexEdit->setText(hexOf(m_color));
-    m_preview->setStyleSheet(swatchStyle(m_color));
+    m_preview->setStyleSheet(swatchStyle(scaleBrightness(m_color, m_brightness)));
 
     for (int i = 0; i < kHistorySize; ++i) {
         if (static_cast<size_t>(i) < m_history.size()) {
@@ -215,7 +279,8 @@ void ColorPickerWidget::applyColorToUi() {
 }
 
 void ColorPickerWidget::emitChanged() {
-    emit colorChanged(m_color[0], m_color[1], m_color[2]);
+    const RGB s = scaleBrightness(m_color, m_brightness);
+    emit colorChanged(s[0], s[1], s[2]);
 }
 
 void ColorPickerWidget::pushHistory(RGB color) {

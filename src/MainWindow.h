@@ -97,6 +97,12 @@ private slots:
     void onPresetError(const QString& msg, int line);
     void tickPresetPlayback();
 
+    // ── Animation scripts (run-once cube.frame() / cube.play() model) ────────
+    void onRunAnimationScript();              // File menu — opens picker
+    void onNewAnimationScript();              // File menu — creates from template
+    void runAnimationScript(const QString& path);   // helper used by both + editor
+    void onAnimationComplete(int fps);
+
     // ── Preset scripting (Phase 4 step C — live reactive mode) ───────────────
     void onLoadReactivePreset();           // panel "Load preset…" button
     void onReactivePresetBands(BandData d);// engine → runner per-frame routing
@@ -171,4 +177,8 @@ private:
     int      m_presetFramesRequested = 0;       // total frames to send
     int      m_presetFramesSent      = 0;       // sent so far
     int      m_presetFramesReceived  = 0;       // returned by the preset so far
+
+    // Animation mode — true while an Animation script's frames are being
+    // collected into the timeline. Discriminator inside onPresetFrameReady.
+    bool     m_animationMode = false;
 };

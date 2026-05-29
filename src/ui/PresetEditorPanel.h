@@ -34,6 +34,11 @@ signals:
     void fileSaved(const QString& path);
     void saveFailed(const QString& path, const QString& reason);
 
+    // Emitted when the user clicks "Run" — MainWindow runs the file as an
+    // animation script (it auto-detects Preset vs Animation; if a reactive
+    // preset is loaded this surfaces a clear error from the runner).
+    void runRequested(const QString& path);
+
 private slots:
     void onTextChanged();
 
@@ -45,6 +50,7 @@ private:
     QPlainTextEdit*    m_editor       = nullptr;
     QLabel*            m_pathLabel    = nullptr;
     QPushButton*       m_saveButton   = nullptr;
+    QPushButton*       m_runButton    = nullptr;
     PythonHighlighter* m_highlighter  = nullptr;
 
     QString m_path;

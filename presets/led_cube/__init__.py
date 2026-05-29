@@ -62,4 +62,40 @@ class Preset:
         pass
 
 
-__all__ = ["Preset", "CubeProxy"]
+class Animation:
+    """Base class for run-once Python animation scripts.
+
+    Unlike Preset, an Animation isn't driven by audio. Subclass it and
+    implement run(self, cube) — your method runs from start to finish
+    in a single call. Inside run(), build each frame and commit it with
+    cube.frame(); call cube.play(fps) once at the end to tell the host
+    what playback rate to use.
+
+    Example:
+
+        class SpinningStripe(Animation):
+            name = "Spinning stripe"
+
+            def run(self, cube):
+                for t in range(60):
+                    cube.clear()
+                    angle = t * 6                       # degrees
+                    # ... paint based on angle ...
+                    cube.frame()
+                cube.play(fps=24)
+
+    See presets/INSTRUCTIONS.md for the full authoring guide.
+    """
+
+    name:        str             = "Untitled animation"
+    description: str             = ""
+    author:      str             = ""
+    tags:        list[str]       = []
+
+    def run(self, cube) -> None:
+        """Override to build frames. Use cube.frame() to commit each one
+        and cube.play(fps) once at the end."""
+        pass
+
+
+__all__ = ["Preset", "Animation", "CubeProxy"]

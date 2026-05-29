@@ -173,6 +173,8 @@ void MainWindow::buildDocks() {
     m_timelineWidget = new TimelineWidget(this);
     m_audioPanel     = new AudioReactivePanel(m_audioEngine.get(), this);
     m_presetEditor   = new PresetEditorPanel(this);
+    connect(m_presetEditor, &PresetEditorPanel::runRequested,
+            this, &MainWindow::runAnimationScript);
 
     m_sliceControl->setGridSize(m_mask->gridSize());
     m_frameInfo->setMask(m_mask);
@@ -207,6 +209,8 @@ void MainWindow::buildMenus() {
     file->addAction(tr("Save &As…"),  QKeySequence::SaveAs, this, &MainWindow::onSaveAs);
     file->addSeparator();
     file->addAction(tr("&Run preset…"), this, &MainWindow::onRunPreset);
+    file->addAction(tr("&New animation script…"), this, &MainWindow::onNewAnimationScript);
+    file->addAction(tr("Run &animation script…"), this, &MainWindow::onRunAnimationScript);
     file->addAction(tr("&Export animation…"), this, &MainWindow::onExportAnimation);
     file->addSeparator();
     file->addAction(tr("E&xit"),      QKeySequence::Quit,   qApp, &QApplication::quit);
@@ -529,19 +533,10 @@ void MainWindow::onExportAnimation() {
         return;
     }
 
-    const QString ffmpeg = QStandardPaths::findExecutable(QStringLiteral("ffmpeg"));
-    if (ffmpeg.isEmpty()) {
-        QMessageBox::warning(this, tr("ffmpeg not found"),
-            tr("ffmpeg is required to export animations.\n\n"
-               "Install it via your package manager — on Ubuntu:\n"
-               "    sudo apt install ffmpeg"));
-        return;
-    }
-
     QString selectedFilter;
     QString path = QFileDialog::getSaveFileName(
         this, tr("Export animation"), QString(),
-        tr("MP4 video (*.mp4);;GIF image (*.gif);;WebM video (*.webm)"),
+        tr("MP4 video (*.mp4);;GIF image (*.gif);;WebM video (*.webm);;PNG sequence (*.png)"),
         &selectedFilter);
     if (path.isEmpty()) return;
 
@@ -551,13 +546,30 @@ void MainWindow::onExportAnimation() {
     const bool hasKnownExt =
            path.endsWith(QStringLiteral(".mp4"),  Qt::CaseInsensitive)
         || path.endsWith(QStringLiteral(".gif"),  Qt::CaseInsensitive)
-        || path.endsWith(QStringLiteral(".webm"), Qt::CaseInsensitive);
+        || path.endsWith(QStringLiteral(".webm"), Qt::CaseInsensitive)
+        || path.endsWith(QStringLiteral(".png"),  Qt::CaseInsensitive);
     if (!hasKnownExt) {
         if      (selectedFilter.contains(QStringLiteral(".gif")))  path += QStringLiteral(".gif");
         else if (selectedFilter.contains(QStringLiteral(".webm"))) path += QStringLiteral(".webm");
+        else if (selectedFilter.contains(QStringLiteral(".png")))  path += QStringLiteral(".png");
         else                                                       path += QStringLiteral(".mp4");
     }
     const bool isGif = path.endsWith(QStringLiteral(".gif"), Qt::CaseInsensitive);
+    const bool isPng = path.endsWith(QStringLiteral(".png"), Qt::CaseInsensitive);
+
+    // PNG sequence doesn't need ffmpeg — QImage::save handles it directly.
+    QString ffmpeg;
+    if (!isPng) {
+        ffmpeg = QStandardPaths::findExecutable(QStringLiteral("ffmpeg"));
+        if (ffmpeg.isEmpty()) {
+            QMessageBox::warning(this, tr("ffmpeg not found"),
+                tr("ffmpeg is required to export to %1.\n\n"
+                   "Install it via your package manager — on Ubuntu:\n"
+                   "    sudo apt install ffmpeg")
+                    .arg(isGif ? QStringLiteral("GIF") : QStringLiteral("video")));
+            return;
+        }
+    }
 
     // Suspend the reactive engine and playback so the export sees clean
     // timeline frames, not whatever the engine is currently overlaying.
@@ -592,40 +604,56 @@ void MainWindow::onExportAnimation() {
         m_timeline->selectFrame(origFrame);
         return;
     }
-    const int w = (probe.width()  / 2) * 2;
-    const int h = (probe.height() / 2) * 2;
+    // Video codecs need even dimensions; PNG can take whatever the
+    // framebuffer gives us. Computing both so the loop below can pick.
+    const int w = isPng ? probe.width()  : (probe.width()  / 2) * 2;
+    const int h = isPng ? probe.height() : (probe.height() / 2) * 2;
     if (w != probe.width() || h != probe.height()) {
         probe = probe.copy(0, 0, w, h);
     }
 
-    const int fps = std::max(1, m_timeline->fps());
-    QStringList args = {
-        QStringLiteral("-y"),
-        QStringLiteral("-f"),            QStringLiteral("rawvideo"),
-        QStringLiteral("-pixel_format"), QStringLiteral("rgba"),
-        QStringLiteral("-video_size"),   QString("%1x%2").arg(w).arg(h),
-        QStringLiteral("-framerate"),    QString::number(fps),
-        QStringLiteral("-i"),            QStringLiteral("-"),
-    };
-    if (isGif) {
-        // Single-pipeline palettegen → paletteuse keeps GIF size reasonable
-        // and avoids the two-pass dance with a temp file.
-        args << QStringLiteral("-vf")
-             << QStringLiteral("split[a][b];[a]palettegen=stats_mode=diff[p];"
-                               "[b][p]paletteuse=dither=bayer:bayer_scale=5:diff_mode=rectangle");
-    } else {
-        args << QStringLiteral("-pix_fmt") << QStringLiteral("yuv420p")
-             << QStringLiteral("-crf")     << QStringLiteral("20");
+    // PNG path resolves a basename + directory for the numbered files.
+    // E.g. user picks "/tmp/myanim.png" → writes "/tmp/myanim_0001.png", etc.
+    QString pngBase, pngDir;
+    if (isPng) {
+        const QFileInfo fi(path);
+        pngDir  = fi.absolutePath();
+        pngBase = fi.completeBaseName();          // "myanim" from "myanim.png"
     }
-    args << path;
+
+    const int fps = std::max(1, m_timeline->fps());
+    QStringList args;
+    if (!isPng) {
+        args = {
+            QStringLiteral("-y"),
+            QStringLiteral("-f"),            QStringLiteral("rawvideo"),
+            QStringLiteral("-pixel_format"), QStringLiteral("rgba"),
+            QStringLiteral("-video_size"),   QString("%1x%2").arg(w).arg(h),
+            QStringLiteral("-framerate"),    QString::number(fps),
+            QStringLiteral("-i"),            QStringLiteral("-"),
+        };
+        if (isGif) {
+            // Single-pipeline palettegen → paletteuse keeps GIF size reasonable
+            // and avoids the two-pass dance with a temp file.
+            args << QStringLiteral("-vf")
+                 << QStringLiteral("split[a][b];[a]palettegen=stats_mode=diff[p];"
+                                   "[b][p]paletteuse=dither=bayer:bayer_scale=5:diff_mode=rectangle");
+        } else {
+            args << QStringLiteral("-pix_fmt") << QStringLiteral("yuv420p")
+                 << QStringLiteral("-crf")     << QStringLiteral("20");
+        }
+        args << path;
+    }
 
     QProcess proc;
-    proc.start(ffmpeg, args);
-    if (!proc.waitForStarted(3000)) {
-        QMessageBox::warning(this, tr("Export failed"),
-            tr("ffmpeg failed to start: %1").arg(proc.errorString()));
-        m_timeline->selectFrame(origFrame);
-        return;
+    if (!isPng) {
+        proc.start(ffmpeg, args);
+        if (!proc.waitForStarted(3000)) {
+            QMessageBox::warning(this, tr("Export failed"),
+                tr("ffmpeg failed to start: %1").arg(proc.errorString()));
+            m_timeline->selectFrame(origFrame);
+            return;
+        }
     }
 
     const int n = m_timeline->frameCount();
@@ -635,7 +663,18 @@ void MainWindow::onExportAnimation() {
     progress.setWindowModality(Qt::WindowModal);
     progress.setMinimumDuration(200);
 
-    auto writeFrame = [&](const QImage& img) -> bool {
+    // Track PNG outputs so we can clean up on cancel.
+    QStringList pngFiles;
+
+    auto writeFrame = [&](int frameIdx, const QImage& img) -> bool {
+        if (isPng) {
+            const QString file = QString("%1/%2_%3.png")
+                .arg(pngDir, pngBase,
+                     QString("%1").arg(frameIdx + 1, 4, 10, QChar('0')));
+            if (!img.save(file, "PNG")) return false;
+            pngFiles.append(file);
+            return true;
+        }
         proc.write(reinterpret_cast<const char*>(img.constBits()),
                    static_cast<qint64>(img.sizeInBytes()));
         // Backpressure: wait for the OS pipe buffer to drain so we don't
@@ -644,11 +683,11 @@ void MainWindow::onExportAnimation() {
     };
 
     bool cancelled = false;
-    if (!writeFrame(probe)) {
+    if (!writeFrame(0, probe)) {
         QMessageBox::warning(this, tr("Export failed"),
-            tr("ffmpeg stalled while accepting frame 1."));
-        proc.kill();
-        proc.waitForFinished(1000);
+            isPng ? tr("Failed to write the first PNG file.")
+                  : tr("ffmpeg stalled while accepting frame 1."));
+        if (!isPng) { proc.kill(); proc.waitForFinished(1000); }
         m_timeline->selectFrame(origFrame);
         return;
     }
@@ -662,13 +701,15 @@ void MainWindow::onExportAnimation() {
         QApplication::processEvents();
         QImage img = m_viewport->grabFramebuffer().convertToFormat(QImage::Format_RGBA8888);
         if (img.width() != w || img.height() != h) img = img.copy(0, 0, w, h);
-        if (!writeFrame(img)) { cancelled = true; break; }
+        if (!writeFrame(i, img)) { cancelled = true; break; }
         progress.setValue(i + 1);
     }
 
-    proc.closeWriteChannel();
-    // GIF's palette pass needs more headroom than a straight video encode.
-    proc.waitForFinished(isGif ? 60000 : 15000);
+    if (!isPng) {
+        proc.closeWriteChannel();
+        // GIF's palette pass needs more headroom than a straight video encode.
+        proc.waitForFinished(isGif ? 60000 : 15000);
+    }
 
     // Restore frame + camera so the user's editing context is unchanged.
     m_timeline->selectFrame(origFrame);
@@ -676,21 +717,34 @@ void MainWindow::onExportAnimation() {
     m_viewport->update();
 
     if (cancelled) {
-        proc.kill();
-        proc.waitForFinished(1000);
-        QFile::remove(path);
+        if (!isPng) {
+            proc.kill();
+            proc.waitForFinished(1000);
+            QFile::remove(path);
+        } else {
+            // Leave nothing half-finished on disk.
+            for (const QString& f : pngFiles) QFile::remove(f);
+        }
         statusBar()->showMessage(tr("Export cancelled."), 3000);
         return;
     }
-    if (proc.exitStatus() != QProcess::NormalExit || proc.exitCode() != 0) {
-        const QString err = QString::fromUtf8(proc.readAllStandardError());
-        QMessageBox::warning(this, tr("Export failed"),
-            tr("ffmpeg exited with code %1.\n\n%2")
-                .arg(proc.exitCode())
-                .arg(err.isEmpty() ? tr("(no stderr output)") : err));
-        return;
+    if (!isPng) {
+        if (proc.exitStatus() != QProcess::NormalExit || proc.exitCode() != 0) {
+            const QString err = QString::fromUtf8(proc.readAllStandardError());
+            QMessageBox::warning(this, tr("Export failed"),
+                tr("ffmpeg exited with code %1.\n\n%2")
+                    .arg(proc.exitCode())
+                    .arg(err.isEmpty() ? tr("(no stderr output)") : err));
+            return;
+        }
     }
-    statusBar()->showMessage(tr("Exported %1 frames to %2").arg(n).arg(path), 5000);
+    if (isPng) {
+        statusBar()->showMessage(
+            tr("Exported %1 PNG frames to %2/%3_NNNN.png")
+                .arg(n).arg(pngDir, pngBase), 5000);
+    } else {
+        statusBar()->showMessage(tr("Exported %1 frames to %2").arg(n).arg(path), 5000);
+    }
 }
 
 void MainWindow::onColorChanged(uint8_t r, uint8_t g, uint8_t b) {
@@ -715,9 +769,31 @@ void MainWindow::onNew() {
 
 void MainWindow::onOpen() {
     const QString path = QFileDialog::getOpenFileName(
-        this, tr("Open Scintilla project"), QString(),
-        tr("Scintilla JSON (*.json);;All files (*)"));
+        this, tr("Open"), QString(),
+        tr("Scintilla projects and scripts (*.json *.py);;"
+           "Scintilla JSON (*.json);;Python scripts (*.py);;"
+           "All files (*)"));
     if (path.isEmpty()) return;
+
+    // Dispatch by extension. .py files load into the editor without
+    // running so the user can review or edit before invoking Run.
+    if (path.endsWith(QStringLiteral(".py"), Qt::CaseInsensitive)) {
+        if (!QFileInfo(path).exists()) {
+            QMessageBox::warning(this, tr("Open failed"),
+                tr("File does not exist: %1").arg(path));
+            return;
+        }
+        if (m_presetEditor) {
+            m_presetEditor->loadFile(path);
+            m_presetEditor->parentWidget()->show();
+            m_presetEditor->raise();
+        }
+        statusBar()->showMessage(
+            tr("Loaded %1 — click Run or use File → Run animation script…")
+                .arg(QFileInfo(path).fileName()),
+            5000);
+        return;
+    }
 
     auto newMask = std::shared_ptr<ShapeMask>();
     const LoadResult r = JsonSerializer::load(path, &newMask, m_timeline.get());
@@ -1011,8 +1087,24 @@ void MainWindow::tickPresetPlayback() {
 }
 
 void MainWindow::onPresetFrameReady(VoxelFrame f) {
-    // Discriminator: offline playback drives a QTimer; live reactive mode
-    // does not. The runner is shared between the two paths.
+    // Discriminator: three modes can be feeding frames in.
+    //   1. Animation script — frames append to the timeline as they arrive.
+    //   2. Offline preset preview — driven by a QTimer with synthetic audio.
+    //   3. Live reactive mode — frames go to the viewport overlay.
+    if (m_animationMode) {
+        if (!m_timeline) return;
+        if (m_presetFramesReceived == 0) {
+            m_timeline->currentFrame() = std::move(f);
+            m_timeline->notifyCurrentFrameEdited();
+        } else {
+            m_timeline->addFrame();
+            m_timeline->currentFrame() = std::move(f);
+            m_timeline->notifyCurrentFrameEdited();
+        }
+        ++m_presetFramesReceived;
+        return;
+    }
+
     const bool offline = m_presetPlaybackTimer && m_presetPlaybackTimer->isActive();
 
     if (offline) {
@@ -1076,6 +1168,122 @@ void MainWindow::ensurePresetRunner() {
             this, [this]() {
                 statusBar()->showMessage(tr("Preset hot-reloaded."), 1500);
             });
+    connect(m_presetRunner.get(), &PresetRunner::animationComplete,
+            this, &MainWindow::onAnimationComplete);
+}
+
+// ── Animation scripts (cube.frame() / cube.play() model) ────────────────────
+
+void MainWindow::onRunAnimationScript() {
+    const QString defaultDir = QDir(QCoreApplication::applicationDirPath())
+                                   .absoluteFilePath(QStringLiteral("../presets"));
+    const QString path = QFileDialog::getOpenFileName(
+        this, tr("Run animation script"), defaultDir,
+        tr("Python animation (*.py)"));
+    if (path.isEmpty()) return;
+    runAnimationScript(path);
+}
+
+void MainWindow::onNewAnimationScript() {
+    // Locate the template alongside the user/ directory; we walk a few
+    // likely places matching where the runtime looks for presets.
+    QString templatePath;
+    for (const QString& base : {
+             QCoreApplication::applicationDirPath() + QStringLiteral("/presets"),
+             QCoreApplication::applicationDirPath() + QStringLiteral("/../presets"),
+             QDir::currentPath() + QStringLiteral("/presets"),
+         }) {
+        const QString candidate = base + QStringLiteral("/user/_animation_template.py");
+        if (QFileInfo(candidate).exists()) { templatePath = candidate; break; }
+    }
+    if (templatePath.isEmpty()) {
+        QMessageBox::warning(this, tr("Template missing"),
+            tr("Could not find presets/user/_animation_template.py next to "
+               "the binary. Reinstall to restore the bundled templates."));
+        return;
+    }
+
+    const QString defaultPath = QFileInfo(templatePath).absolutePath()
+                                  + QStringLiteral("/my_animation.py");
+    QString path = QFileDialog::getSaveFileName(
+        this, tr("New animation script"), defaultPath,
+        tr("Python animation (*.py)"));
+    if (path.isEmpty()) return;
+    if (!path.endsWith(QStringLiteral(".py"), Qt::CaseInsensitive)) {
+        path += QStringLiteral(".py");
+    }
+
+    // Copy template to the target path. Refuse to clobber unless the user
+    // chose the existing file via the save dialog (which already prompted).
+    QFile src(templatePath);
+    if (!src.open(QFile::ReadOnly | QFile::Text)) {
+        QMessageBox::warning(this, tr("Could not read template"),
+            tr("%1: %2").arg(templatePath, src.errorString()));
+        return;
+    }
+    const QByteArray content = src.readAll();
+    src.close();
+
+    QFile dst(path);
+    if (!dst.open(QFile::WriteOnly | QFile::Truncate | QFile::Text)) {
+        QMessageBox::warning(this, tr("Could not create script"),
+            tr("%1: %2").arg(path, dst.errorString()));
+        return;
+    }
+    dst.write(content);
+    dst.close();
+
+    // Load into the editor and surface the editor tab so the user starts
+    // editing immediately.
+    if (m_presetEditor) {
+        m_presetEditor->loadFile(path);
+        m_presetEditor->parentWidget()->show();
+        m_presetEditor->raise();
+    }
+    statusBar()->showMessage(
+        tr("Created %1 — edit, then click Run.").arg(QFileInfo(path).fileName()),
+        5000);
+}
+
+void MainWindow::runAnimationScript(const QString& path) {
+    if (path.isEmpty() || !QFileInfo(path).exists()) {
+        QMessageBox::warning(this, tr("Script missing"),
+            tr("Animation script does not exist: %1").arg(path));
+        return;
+    }
+    if (!confirmDiscardIfDirty(
+            tr("Running an animation script clears the timeline and replaces it "
+               "with the generated frames. Continue?"))) {
+        return;
+    }
+
+    ensurePresetRunner();
+    m_presetRunner->setCubeMeta(m_mask->gridSize(),
+                                QString::fromStdString(shapeTypeName(m_mask->shape())),
+                                m_mask->count());
+
+    m_animationMode         = true;
+    m_presetFramesReceived  = 0;
+    // Disable the offline-playback path so its onPresetFrameReady branch
+    // isn't accidentally entered.
+    if (m_presetPlaybackTimer) m_presetPlaybackTimer->stop();
+
+    m_timeline->clearAll();
+    statusBar()->showMessage(tr("Running %1…").arg(QFileInfo(path).fileName()), 4000);
+    m_presetRunner->loadPreset(path);
+}
+
+void MainWindow::onAnimationComplete(int fps) {
+    if (!m_animationMode) return;   // ignore stray play messages
+    m_animationMode = false;
+    if (m_timeline) m_timeline->setFps(std::clamp(fps, 1, 60));
+    statusBar()->showMessage(
+        tr("Animation finished — %1 frames at %2 fps.")
+            .arg(m_presetFramesReceived).arg(fps),
+        5000);
+    // The runner subprocess is still alive; tear it down so a fresh run
+    // (or a different script) starts clean.
+    if (m_presetRunner) m_presetRunner->unload();
 }
 
 // ── Preset scripting (Phase 4 step C — live reactive mode) ───────────────────

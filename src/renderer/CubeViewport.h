@@ -154,6 +154,7 @@ private:
 
     void applyTool(int instanceIdx);          // Pick / Fill — one-shot, no undo
     void applyToolStroke(int instanceIdx);    // Paint / Erase — appends to m_currentStroke
+    void showVoxelContextMenu(int instanceIdx, QPoint globalPos);
 
     // ── Stroke painting state (active while LMB held with Paint/Erase) ───────
     bool                m_strokeActive = false;
