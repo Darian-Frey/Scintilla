@@ -17,7 +17,7 @@ authoring Python presets, see also [presets/INSTRUCTIONS.md](presets/INSTRUCTION
 5. [Shapes and grid size](#shapes-and-grid-size)
 6. [Camera controls](#camera-controls)
 7. [Audio reactivity](#audio-reactivity)
-8. [Python presets](#python-presets)
+8. [Python scripting](#python-scripting)
 9. [Exporting animations](#exporting-animations)
 10. [Saving and loading projects](#saving-and-loading-projects)
 11. [Keyboard shortcuts](#keyboard-shortcuts)
@@ -129,15 +129,32 @@ When a slice is active:
 
 ### Colour selection
 
-The **Colour** dock combines four ways to pick a colour:
+The **Colour** dock combines five ways to pick a colour:
 
 - Hex field — type `#RRGGBB` directly.
-- RGB sliders — drag each channel.
+- RGB sliders — drag each channel (0–255).
+- Brightness — slider plus QSpinBox (0–100 %) that scales the base
+  RGB before emit. 100 % paints the full colour; 50 % paints it at
+  half brightness; 0 % is treated as erase. The spinbox lets you
+  type exact values when the slider's pixel resolution would skip
+  the value you want.
 - Palette — click any swatch.
 - Recent — the last eight colours you used.
 
-The current colour is shown in the preview at the top. The **Pick**
-tool also pushes a sampled colour into Recent.
+The preview at the top shows the **scaled** result that will actually
+be painted; the hex field and R/G/B sliders always show the **base**
+colour. The Pick tool pushes a sampled colour into Recent and resets
+brightness to 100 % so "what you sampled is what you paint".
+
+### Right-click LED edit
+
+Right-click a lit LED to open a context menu with **Edit colour…**
+(opens Qt's colour picker pre-loaded with the LED's current colour)
+and **Clear** (turns the LED off). Both go through the undo stack so
+Ctrl+Z reverts them.
+
+Right-mouse drag still orbits — the menu only opens if you released
+the button without dragging.
 
 ### Fill
 
@@ -310,7 +327,7 @@ Set **Reactive** in the panel. Modes:
 | Radial EQ        | Bands → concentric shells from centre outward.                  |
 | Tunnel           | Current spectrum on the far Z slice, past frames recede.        |
 | Energy floor     | RMS-driven wall rises from Y=0; X axis tinted by band.          |
-| Python preset    | Custom .py file drives the frames (see [Python presets](#python-presets)). |
+| Python preset    | Custom .py file drives the frames (see [Python scripting](#python-scripting)). |
 
 Selecting any mode other than Off starts audio capture if it isn't
 already running.
@@ -348,17 +365,30 @@ performance into an animation you can play back without audio later.
 
 ---
 
-## Python presets
+## Python scripting
 
-Two ways to run a preset:
+Scintilla speaks two kinds of Python scripts:
 
-### Offline preview
+- **Reactive presets** (subclass `Preset`) receive live audio bands
+  every frame and paint the cube in response.
+- **Animation scripts** (subclass `Animation`) run once at load,
+  emit a fixed sequence of frames via `cube.frame()`, and finalise
+  with `cube.play(fps)`. No audio.
 
-**File → Run preset…** runs a preset over 120 synthesised audio
-frames and appends the result to the timeline. Useful for previewing
-what a preset looks like without needing live audio.
+The script's base class declares its type. Loading the wrong type
+via the wrong menu item is caught up front and produces a clear
+error rather than running and failing per audio frame.
 
-### Live reactive mode
+### Reactive presets
+
+Two ways to run one:
+
+**Offline preview.** **File → Run preset…** drives a preset over
+120 synthesised audio frames and appends the result to the timeline.
+Useful for previewing what a preset looks like without needing live
+audio.
+
+**Live reactive mode.**
 
 1. Set **Reactive: Python preset** in the Audio reactive dock.
 2. Click **Load preset…** (button appears in the Python preset
@@ -367,42 +397,73 @@ what a preset looks like without needing live audio.
 
 The path of the loaded preset shows under the button.
 
+### Animation scripts
+
+**File → New animation script…** opens a save dialog defaulting to
+`presets/user/animations/my_animation.py`, copies the bundled
+animation template to that path, and opens it in the Preset editor.
+Edit, click Run.
+
+**File → Run animation script…** runs an existing script: the
+timeline is cleared and filled with whatever frames the script's
+`run()` method emits via `cube.frame()`. The timeline FPS is set
+from the script's `cube.play(fps)` call.
+
+The two shipped animation scripts live in
+`presets/builtin/animations/` — `anim_spiral.py` (single voxel walks
+a rising 3D spiral) and `anim_lorenz.py` (Lorenz attractor butterfly
+with a rainbow trail; designed to look its best at 24³+).
+
 ### The in-app editor
 
 The **Preset editor** tab in the bottom dock shows the source of the
-currently loaded preset, with Python syntax highlighting. Edit the
-file, press **Ctrl+S** (or click **Save**), and the preset hot-reloads
-without interrupting playback.
+currently loaded script, with Python syntax highlighting.
 
-A `●` next to the filename means the file has unsaved changes.
+- **Save** (`Ctrl+S` or the Save button) writes the file. For
+  reactive presets the runner's file watcher hot-reloads
+  automatically. For animation scripts, save just writes — click Run
+  to re-execute.
+- **Run** button executes the loaded script as an animation. Useful
+  for iterating: edit, Ctrl+S, Run, repeat.
+- A `●` next to the filename means the file has unsaved changes.
+
+You can also **File → Open** a `.py` file directly — the editor
+loads it without running, useful for inspecting a script before
+deciding which run path to use.
 
 ### Writing your own
 
-Drop new `.py` files in `presets/user/reactive/` (audio-reactive
-presets) or `presets/user/animations/` (run-once animation scripts).
-The shipped library lives in the corresponding `presets/builtin/`
-subfolders. See [presets/INSTRUCTIONS.md](presets/INSTRUCTIONS.md)
-for the full authoring guide.
+Drop reactive presets in `presets/user/reactive/` and animation
+scripts in `presets/user/animations/`. The shipped library lives in
+the corresponding `presets/builtin/` subfolders. See
+[presets/INSTRUCTIONS.md](presets/INSTRUCTIONS.md) for the full
+authoring guide.
 
 ---
 
 ## Exporting animations
 
-**File → Export animation…** renders the timeline to a video file via
-an `ffmpeg` subprocess (ffmpeg must be on your system PATH — on
-Ubuntu install with `sudo apt install ffmpeg`).
+**File → Export animation…** renders the timeline through one of
+four output paths.
 
 1. Pick an output path. The extension chooses the format:
    - `.mp4` — H.264, CRF 20 (high quality, small files).
    - `.gif` — palette-generated GIF (decent quality, larger files).
    - `.webm` — currently uses the MP4 encoding args inside a WebM
      container.
-2. The dialog auto-appends the right extension if you forget.
-3. A progress dialog tracks frame N of M. Cancel deletes the
-   half-written file.
-4. Camera keyframes drive the camera during the export — the rendered
+   - `.png` — PNG sequence: each frame is saved as a numbered file
+     (`myanim_0001.png`, `myanim_0002.png`, …) in the chosen
+     directory. **Does not need ffmpeg** — `QImage::save` handles
+     it directly.
+2. `ffmpeg` is required for `.mp4`, `.gif`, and `.webm` and must be
+   on your system PATH (on Ubuntu: `sudo apt install ffmpeg`). PNG
+   sequence skips this check entirely.
+3. The dialog auto-appends the right extension if you forget.
+4. A progress dialog tracks frame N of M. Cancel deletes any
+   half-written output.
+5. Camera keyframes drive the camera during the export — the rendered
    video matches what you'd see during playback.
-5. The audio reactive engine is paused for the export so its overlay
+6. The audio reactive engine is paused for the export so its overlay
    doesn't bleed into the captured frames.
 
 The exported video uses the timeline's FPS and the viewport's current
@@ -416,9 +477,12 @@ For a higher-resolution export, resize the viewport before exporting.
 **File → New** (`Ctrl+N`) starts a fresh project. Asks to confirm
 discard if your timeline isn't empty.
 
-**File → Open…** (`Ctrl+O`) loads a Scintilla JSON file. The file
-carries shape, grid size, FPS, and every frame. Grid sizes > 32 are
-clamped on load (binding decision DEC-005).
+**File → Open…** (`Ctrl+O`) auto-dispatches by extension. A `.json`
+file is loaded as a Scintilla project (carries shape, grid size,
+FPS, and every frame; grid sizes > 32 are clamped on load per
+DEC-005). A `.py` file is loaded into the Preset editor without
+running, useful for inspecting a script before deciding which run
+path to use.
 
 **File → Save** (`Ctrl+S`) saves to the current path; **Save As…**
 (`Ctrl+Shift+S`) prompts for a new one.
@@ -447,7 +511,7 @@ the JSON is supported (and the same wire format Python presets use).
 | Shortcut          | Action                                  |
 |-------------------|-----------------------------------------|
 | `Ctrl+N`          | New project                             |
-| `Ctrl+O`          | Open project                            |
+| `Ctrl+O`          | Open project (`.json`) or script (`.py`) |
 | `Ctrl+S`          | Save                                    |
 | `Ctrl+Shift+S`    | Save As                                 |
 | `Ctrl+Z`          | Undo                                    |
@@ -462,8 +526,10 @@ the JSON is supported (and the same wire format Python presets use).
 | `Ctrl+Shift+K`    | Set camera keyframe at current frame    |
 | `Ctrl+Q`          | Quit                                    |
 
-In the Preset editor, **`Ctrl+S`** saves the preset file (triggers a
-hot-reload). All other text-edit shortcuts behave normally.
+In the Preset editor, **`Ctrl+S`** saves the file. For reactive
+presets the runner hot-reloads on save; for animation scripts save
+just writes — click the editor's **Run** button to re-execute. All
+other text-edit shortcuts behave normally.
 
 ---
 
