@@ -1,14 +1,22 @@
-# Writing your own Scintilla preset
+# Writing your own Scintilla script
 
-A preset is a Python file that produces one frame of voxel colours per
-audio frame, driven by the cube's audio analysis (bands, RMS, centroid,
-beat detection). The runtime takes care of audio capture, FFT, beat
-onset detection, and rendering — your code just decides what colour
-each LED should be.
+A Scintilla script is a Python file that drives the cube's LEDs. The
+runtime handles audio capture, FFT, beat detection, subprocess launch,
+and rendering — your code just decides what colour each LED should be.
 
-This document walks through writing a new preset from scratch, the API
-your code talks to, common patterns the built-in presets use, and how
-to debug a misbehaving preset.
+Two kinds of scripts:
+
+- **Preset** — reactive. Receives live audio bands every frame and
+  paints in response. Best for visualisers that react to music.
+- **Animation** — run-once. Your `run()` method runs to completion,
+  emitting frames each time you call `cube.frame()`; finalised with
+  `cube.play(fps)`. Best for programmatic animations that don't need
+  audio.
+
+The runtime detects which type from the base class the script
+inherits, and loading the wrong type via the wrong menu item is
+caught up front with a clear error. This document walks through both,
+the shared `cube` API, common patterns for each, and debugging tips.
 
 If you just want a starting point, copy one of the templates in
 [user/reactive/](user/reactive/) or [user/animations/](user/animations/)
@@ -17,9 +25,9 @@ what's in there and why.
 
 ---
 
-## Quick start
+## Quick start (reactive preset)
 
-A working preset is roughly twenty lines:
+A working reactive preset is roughly twenty lines:
 
 ```python
 from led_cube import Preset
@@ -176,7 +184,7 @@ call. Hue is in **degrees** (0–360), saturation and value in 0–1.
 
 ---
 
-## Patterns
+## Common preset patterns
 
 ### Beat-triggered impulse
 
@@ -269,14 +277,191 @@ def on_frame(self, cube, audio):
 
 ---
 
+## Animation scripts
+
+While a Preset paints one frame in response to audio, an Animation
+runs once and explicitly emits a fixed sequence of frames. No audio
+is involved — the script controls its own timing and length.
+
+### Quick start
+
+A working animation is also about twenty lines:
+
+```python
+from led_cube import Animation
+import numpy as np
+
+class MyAnimation(Animation):
+    name = "My animation"
+
+    def run(self, cube):
+        gc = cube.grid_coords()
+        for t in range(60):
+            hue = (gc[:, 0] * (360 / max(1, cube.size - 1)) + t * 12) % 360
+            cube.set_hsv(hue, 1.0, 1.0)
+            cube.frame()
+        cube.play(fps=24)
+```
+
+Save it as `presets/user/animations/my_animation.py` and click **Run**
+in the Preset editor (or use **File → Run animation script…**). The
+timeline fills with 60 frames; FPS is set to whatever `cube.play(fps)`
+requested.
+
+### The Animation lifecycle
+
+Just one method:
+
+```python
+def run(self, cube): ...
+```
+
+Called once when the script is loaded. Inside, you typically:
+
+1. Pre-compute any geometry or trajectory data once at the top.
+2. Loop over frame indices, painting + `cube.frame()` per iteration.
+3. Finalise with `cube.play(fps)` once at the end.
+
+There's no `on_load` equivalent — initialise state inside `run()` itself
+before the main loop. There's no per-frame callback either — the loop
+is yours to write, so you control the number of frames directly.
+
+### Emitting frames
+
+Two methods unique to Animation:
+
+| Method            | Effect                                                                                  |
+|-------------------|-----------------------------------------------------------------------------------------|
+| `cube.frame()`    | Commits the current cube state as one animation frame. The write buffer auto-clears for the next iteration unless you called `cube.retain()` first. |
+| `cube.play(fps)`  | Finalises the animation and tells the host to play it at the given FPS (1–60). Call this once after the loop; the script normally returns shortly after. |
+
+The shared `cube` API (`set`, `set_hsv`, `fill`, `clear`, `fade`,
+`retain`) all behave the same as for Preset above. The geometry getters
+(`positions()`, `grid_coords()`, `distances_from_centre()`, `angles()`,
+`centre`) also behave the same — pre-compute them once at the top of
+`run()` rather than every iteration.
+
+### Common animation patterns
+
+#### Parametric curve
+
+A single voxel traces a mathematical path through the cube. Lissajous
+figures, helices, hypocycloids — anything you can express as
+`(x(t), y(t), z(t))`.
+
+```python
+def run(self, cube):
+    n = cube.size
+    cx, cy, cz = (n - 1) * 0.5, (n - 1) * 0.5, (n - 1) * 0.5
+    r = n * 0.4
+    for t in range(180):
+        a = t * np.pi / 30
+        x = int(round(cx + np.cos(a) * r))
+        y = int(round(cy + np.sin(2 * a) * r * 0.7))
+        z = int(round(cz + np.sin(3 * a) * r * 0.7))
+        cube.fade(0.9)               # fade existing trail
+        cube.set(x, y, z, 255, 0, 0) # paint new head
+        cube.retain()                # keep the trail for next iteration
+        cube.frame()
+    cube.play(fps=24)
+```
+
+#### Pre-computed trajectory + auto-scale
+
+For chaotic systems (Lorenz, Rössler) the bounding box isn't known
+ahead of time. Generate the full trajectory first, scale it into the
+cube with a margin, then walk through. `anim_lorenz.py` uses exactly
+this pattern.
+
+```python
+def run(self, cube):
+    # 1. Generate trajectory.
+    N = 1000
+    traj = np.zeros((N, 3), dtype=np.float32)
+    x, y, z = 0.1, 0.0, 0.0
+    sigma, rho, beta = 10.0, 28.0, 8.0 / 3.0
+    dt = 0.012
+    for i in range(N):
+        x += sigma * (y - x) * dt
+        y += (x * (rho - z) - y) * dt
+        z += (x * y - beta * z) * dt
+        traj[i] = (x, y, z)
+
+    # 2. Auto-scale to fit the cube with a 10 % margin.
+    n = cube.size
+    mn, mx = traj.min(axis=0), traj.max(axis=0)
+    scale = (n - 1) * 0.9 / max(1e-6, (mx - mn).max())
+    centre = (mn + mx) * 0.5
+    cube_centre = np.full(3, (n - 1) * 0.5, dtype=np.float32)
+    pts = np.clip(((traj - centre) * scale + cube_centre)
+                  .round().astype(int), 0, n - 1)
+
+    # 3. Render one frame per trajectory point.
+    for px, py, pz in pts:
+        cube.fade(0.92)
+        cube.set(int(px), int(py), int(pz), 0, 255, 0)
+        cube.retain()
+        cube.frame()
+    cube.play(fps=30)
+```
+
+#### Time-driven field
+
+Treat each frame as a snapshot of a function of position and time.
+Identical to the Preset position-driven pattern but with your own
+loop index instead of `audio.time`.
+
+```python
+def run(self, cube):
+    pos = cube.positions()
+    r   = np.linalg.norm(pos - cube.centre, axis=1)
+    for t_frame in range(120):
+        t     = t_frame * 0.1
+        field = np.sin(r * 0.6 + t)
+        cube.set_hsv(180, 1.0, np.clip(0.5 + field * 0.5, 0, 1))
+        cube.frame()
+    cube.play(fps=24)
+```
+
+#### Trail with retain()
+
+`cube.frame()` clears the buffer for the next iteration unless you
+call `cube.retain()` before it. For trail effects: fade existing
+buffer, paint new contributions on top, retain, frame.
+
+```python
+def run(self, cube):
+    for t in range(120):
+        cube.fade(0.85)              # fade what's already drawn
+        cube.set(t % cube.size, 0, 0, 255, 0, 0)
+        cube.retain()                # keep buffer through cube.frame()
+        cube.frame()
+    cube.play(fps=30)
+```
+
+### How long is an animation?
+
+Whatever your loop says. There's no built-in cap; a script that
+emits 10 000 frames at `fps=60` produces a 167-second animation. In
+practice the timeline soft cap is high enough to handle anything
+visually reasonable — but each frame is one entry in the JSON save
+file, so keep that in mind for project size.
+
+---
+
 ## Performance
 
-- The audio loop runs at ~60 Hz. Aim for `on_frame` under ~10 ms on
-  a `cube.size = 24` (≈ 13 800 LEDs).
+- For **presets**: the audio loop runs at ~60 Hz, so aim for
+  `on_frame` under ~10 ms on a `cube.size = 24` (≈ 13 800 LEDs).
+  Anything slower will start dropping frames.
+- For **animations**: the script runs once, so per-iteration speed
+  matters less — but a Python loop that takes 100 ms × 1000 frames
+  is still a 100-second wait before the timeline fills.
 - Prefer vectorised numpy operations over Python loops. A loop over
   `cube.count` will be the bottleneck before anything else.
-- Pre-compute geometry in `on_load`. Anything that only depends on
-  cube positions (distances, angles, projections) only needs to be
+- Pre-compute geometry once (in `on_load` for presets, at the top of
+  `run()` for animations). Anything that only depends on cube
+  positions (distances, angles, projections) only needs to be
   computed once.
 - Use `cube.set_hsv` with arrays instead of looping `cube.set` per
   LED.
@@ -285,13 +470,16 @@ def on_frame(self, cube, audio):
 
 ## Hot-reload, errors, and debugging
 
-- **Hot-reload.** Saving the file (Ctrl+S in the in-app editor, or
-  saving externally) restarts the Python subprocess and reloads your
-  preset. State in `on_load` is rebuilt; persistent globals are lost.
+- **Hot-reload (presets only).** Saving a reactive preset (Ctrl+S in
+  the in-app editor, or externally) restarts the Python subprocess
+  and reloads. State in `on_load` is rebuilt; persistent globals are
+  lost. Animation scripts don't hot-reload — save the file, then
+  click **Run** in the editor to re-execute.
 - **Errors.** Exceptions inside `on_load` / `on_beat` / `on_frame`
-  are caught by the runner and surfaced as an error dialog with the
-  traceback. The subprocess keeps running and will accept the next
-  hot-reload.
+  (presets) or `run()` (animations) are caught by the runner and
+  surfaced as an error dialog with the traceback. For presets the
+  subprocess keeps running and accepts the next hot-reload; for
+  animations the run aborts and you fix-and-Run again.
 - **`print()`** writes go to Scintilla's terminal stderr, prefixed
   with `[preset] subprocess stderr:`. Useful for sanity-checking
   values.
