@@ -9,6 +9,11 @@ A 3D LED array designer that dances to your music. Spiritual successor to the ph
 [8×8×8 LED Cube](https://github.com/Darian-Frey/LED_Cube) (2009), removing all hardware constraints — arbitrary grid sizes (3³–32³), full RGB per voxel, multiple array shapes, a frame-based animation timeline, music-reactive playback via PortAudio + KissFFT, and a Python preset scripting engine inspired by Winamp AVS.
 
 <p align="center">
+  <img src="media/UX.png" alt="Scintilla IDE-style interface" width="880">
+  <br><em>The interface: code editor on the left, 3D viewport in the centre, controls on the right, scrubber timeline along the bottom.</em>
+</p>
+
+<p align="center">
   <img src="media/scintilla-demo.gif" alt="Audio-reactive plasma preset at 8³" width="640">
   <br><em>Audio-reactive plasma preset, 8³ grid</em>
 </p>

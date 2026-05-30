@@ -210,18 +210,25 @@ void MainWindow::buildDocks() {
     m_timelineWidget->setTimeline(m_timeline.get());
     m_colorPicker->setCurrentColor(255, 64, 32);
 
+    // IDE-style layout: editor on the left, viewport in the centre,
+    // controls on the right, timeline along the bottom.
+    auto* editorDock = makeDock(tr("Preset editor"),
+                                m_presetEditor,             Qt::LeftDockWidgetArea);
+    // Editor wants a chunky default width — code is unreadable in a 200 px
+    // column. The user can still resize / float / hide it like any dock.
+    m_presetEditor->setMinimumWidth(360);
+    editorDock->resize(440, editorDock->height());
+
     makeDock(tr("Colour"),         scrollable(m_colorPicker),  Qt::RightDockWidgetArea);
     makeDock(tr("Slice"),          scrollable(m_sliceControl), Qt::RightDockWidgetArea);
     makeDock(tr("Audio reactive"), scrollable(m_audioPanel),   Qt::RightDockWidgetArea);
     makeDock(tr("Frame"),          scrollable(m_frameInfo),    Qt::RightDockWidgetArea);
-    auto* timelineDock = makeDock(tr("Timeline"),
-                                  m_timelineWidget,           Qt::BottomDockWidgetArea);
-    auto* editorDock   = makeDock(tr("Preset editor"),
-                                  m_presetEditor,             Qt::BottomDockWidgetArea);
-    // Tabify so the bottom dock area shows one tab per panel; user can drag
-    // them apart or float either if they want both visible.
-    tabifyDockWidget(timelineDock, editorDock);
-    timelineDock->raise();
+
+    makeDock(tr("Timeline"), m_timelineWidget, Qt::BottomDockWidgetArea);
+
+    // Ensure the editor really does land at a usable starting width even
+    // after Qt's auto-distribution between dock areas.
+    resizeDocks({editorDock}, {440}, Qt::Horizontal);
 }
 
 // ── Menus ────────────────────────────────────────────────────────────────────
@@ -1197,8 +1204,12 @@ void MainWindow::ensurePresetRunner() {
             this, &MainWindow::onPresetError);
     connect(m_presetRunner.get(), &PresetRunner::presetUnloaded,
             this, [this]() {
-                if (m_audioPanel)   m_audioPanel->setPresetStatus(QString());
-                if (m_presetEditor) m_presetEditor->clearFile();
+                // Only clear the Audio panel's "Loaded: X" indicator. The
+                // editor's file is independent of the runner's lifecycle —
+                // animations call unload() right after run() returns, and
+                // clearing the editor there would make the file disappear
+                // exactly when the user wants to iterate on it.
+                if (m_audioPanel) m_audioPanel->setPresetStatus(QString());
             });
     connect(m_presetRunner.get(), &PresetRunner::hotReloaded,
             this, [this]() {
