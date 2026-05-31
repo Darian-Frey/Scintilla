@@ -152,13 +152,36 @@
 
 ---
 
+## Phase 9 — Scripting authoring + IDE polish (Complete)
+
+**Goal:** Round out the Python scripting toolchain — both reactive presets and run-once animation scripts — with first-class authoring ergonomics, add per-LED brightness control, and reshape the window into an IDE-style layout.
+
+**Status:** Complete (2026-05-23 to 2026-05-30, commits `f545f41` → `0d20d73`)
+
+**Features delivered:**
+
+- **Animation script model** — new `Animation` base class alongside `Preset`. Scripts run once via `run(self, cube)` and emit frames via `cube.frame()`; finalise with `cube.play(fps)`. Wire protocol gains a `play` message; `PresetRunner` exposes `animationComplete(int fps)`. New menu items: **File → New animation script…**, **File → Run animation script…**. Preset editor gains a **Run** button. File → Open auto-dispatches by extension (`.json` → project, `.py` → editor).
+- **PNG sequence export** (extends F-032/F-033) — fourth format in File → Export animation… alongside MP4 / GIF / WebM. Skips ffmpeg entirely and writes numbered `<base>_NNNN.png` files via `QImage::save`.
+- **Per-LED brightness** — Colour dock gains a brightness slider + `QSpinBox` (0–100 %). Emitted colour is the dimmed result; hex / R / G / B sliders show the base; Pick resets brightness to 100 %. Python API mirrors via an optional `brightness=0.0..1.0` kwarg on `cube.set / set_pos / set_all / fill`. Shader scales the white-hot core mix and intensity envelope by `max(R, G, B)` so dim LEDs look dim.
+- **Right-click LED context menu** — right-click a lit voxel → "Edit colour…" (QColorDialog) or "Clear". Both go through the `VoxelStrokeCommand` path so they're undoable. Right-mouse drag still orbits.
+- **IDE-style layout** — Preset editor moved to `Qt::LeftDockWidgetArea` (440 px default, 360 px min). Editor file state decoupled from runner process lifecycle so the file survives Run / animation cycles.
+- **Crash hardening** — regex-based script-type detection refuses Animation-as-Preset and Preset-as-Animation loads up front; `onPresetError` throttles dialogs to one per 5 s and force-stops the audio engine on first error in `PythonPreset` mode. Prevents the BUG-015 modal-flood lockup.
+- **Library additions** — `anim_spiral.py` and `anim_lorenz.py` shipped Animation scripts. Fire preset rewritten as a proper bottom-up cellular automaton (BUG-016/017 paired fixes).
+- **Directory split** — `presets/builtin/{reactive,animations}/` and `presets/user/{reactive,animations}/`; templates moved into their respective subfolders; file-dialog defaults updated to land in the right subdir.
+- **Documentation pass** — USER_MANUAL.md, INSTRUCTIONS.md (now covers both script types), README (UX screenshot + Lorenz gif), BUGS / IMPROVEMENTS / CHANGELOG synced.
+
+**Acceptance:** Open an animation `.py` via File → Open → it appears in the editor. Click Run → the timeline fills and the editor still shows the file. Iterate (edit, Ctrl+S, Run) without losing state. Brightness slider produces a perceptible gradient at 0 / 25 / 50 / 75 / 100 %. Loading an Animation script as Python-preset reactive mode no longer flood-locks the UI. Met.
+
+---
+
 ## Future phases (uncommitted)
 
-- **Phase 9 — Extended export** (F-034 PNG sequence, F-035 C-array hardware dump). Both are short follow-ups to Phase 7's export pipeline.
-- **Phase 10 — Extended shapes** (F-031 torus, ring, cross; F-039 custom imported meshes). Shape mask system is already pluggable.
-- **Phase 11 — Persistence polish** — extend the JSON save format to carry camera keyframes (currently session-only).
-- **Phase 12 — Public release** — itch.io / github releases packaging, code signing, README polish, demo video.
+- **Phase 10 — Extended export** (F-034 C-array hardware dump). Renders a frame sequence as a `const uint8_t[]` header for flashing to the original [LED_Cube](https://github.com/Darian-Frey/LED_Cube) 2009 firmware. Format depends on what the firmware expects (bit-packed mono vs RGB per LED, frame stride, byte order); decision is the only blocker.
+- **Phase 11 — Extended shapes** (F-031 torus, ring, cross; F-039 custom imported meshes). Shape mask system is already pluggable.
+- **Phase 12 — Persistence polish** — extend the JSON save format to carry camera keyframes (currently session-only); optional VP9-correct WebM encoding (IMP-011); Fill wrapped in `VoxelStrokeCommand` for proper undo (IMP-010).
+- **Phase 13 — Public release** — itch.io / GitHub releases packaging, code signing, demo video, release notes.
 
-**Loose ends in current phases:**
-- Fill is not yet undoable (logged as IMP — same pattern as the stroke commands, just hasn't been wrapped).
-- WebM container currently uses MP4 encoding args; a true VP9 path would be more correct.
+**Loose ends in current phases** (tracked in `IMPROVEMENTS.md`):
+
+- IMP-010 — Fill tool not yet wrapped in `VoxelStrokeCommand`; bulk fills skip the undo stack.
+- IMP-011 — WebM container currently feeds H.264 encoder args; a `libvpx-vp9` path would be more correct.
