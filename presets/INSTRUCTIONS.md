@@ -91,6 +91,42 @@ functions, module constants, other classes) is fine and ignored.
 
 ---
 
+## Declaring a preferred cube (optional)
+
+A script can declare the cube it expects to run on by setting two
+optional class attributes:
+
+```python
+class MyAnimation(Animation):
+    name        = "My animation"
+    grid_size   = 24
+    shape       = "cube"
+
+    def run(self, cube):
+        ...
+```
+
+When Scintilla loads the script, it reads `grid_size` and `shape`. If
+either differs from the active cube, a small dialog appears: *"My
+animation declares a target cube (24³ cube) that differs from the
+current cube (8³ sphere). Apply the script's requirements? This will
+clear the current animation."* — Apply switches the cube; Cancel
+aborts the run. If both already match, no dialog appears.
+
+Recognised `shape` values: `"cube"`, `"sphere"`, `"cylinder"`,
+`"pyramid"`, `"torus"`, `"ring"`, `"cross"`, `"custom"`. Unknown
+shape names are silently ignored with a status-bar warning.
+
+Both attributes are optional — leave them off if your script
+auto-scales to any cube size (like `anim_lorenz.py` does).
+
+**File → New animation script…** pre-fills these attributes with
+the cube you're currently working with, so a fresh script starts
+matched to the active cube and the dialog stays quiet on the first
+run.
+
+---
+
 ## The lifecycle
 
 Your class implements up to three callbacks. All three are optional;

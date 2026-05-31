@@ -160,7 +160,8 @@ the button without dragging.
 
 With the **Fill** tool active, one click fills every LED in the
 current slice with the active paint colour. With no slice active,
-Fill paints the whole cube. (Fill is not yet undoable.)
+Fill paints the whole cube. The whole fill counts as one undo step
+— Ctrl+Z reverts every voxel the fill touched.
 
 ---
 
@@ -215,15 +216,24 @@ indices in the saved strokes would otherwise be invalidated.
 
 ## Shapes and grid size
 
-The **Shape** menu picks the cube's LED mask. Five shapes are built
-in:
+The **Shape** menu picks the cube's LED mask. Seven procedural shapes
+plus a custom mesh import are built in:
 
-| Shape    | Mask                                                          |
-|----------|---------------------------------------------------------------|
-| Cube     | All positions in the grid.                                    |
-| Sphere   | LEDs inside the inscribed sphere.                             |
-| Cylinder | LEDs inside a cylinder along the Y axis.                      |
-| Pyramid  | Square base, half-width shrinks linearly to a point at the top. |
+| Shape    | Mask                                                                |
+|----------|---------------------------------------------------------------------|
+| Cube     | All positions in the grid.                                          |
+| Sphere   | LEDs inside the inscribed sphere.                                   |
+| Cylinder | LEDs inside a cylinder along the Y axis.                            |
+| Pyramid  | Square base, half-width shrinks linearly to a point at the top.     |
+| Torus    | Donut around the Y axis; major radius ≈ 62 %, minor ≈ 32 %.         |
+| Ring     | Hollow cylinder along Y; inner wall at 55 % of the cube radius.     |
+| Cross    | Three perpendicular axis-aligned arms intersecting at the centre.   |
+
+**Shape → Import mesh…** loads a binary or ASCII `.stl` file, auto-fits
+it into the current grid with a 10 % margin, and voxelises by sampling
+points on each triangle (sample count scales with triangle area).
+Result is a Custom-shape mask — the JSON save format round-trips its
+voxel positions, so imported meshes survive save / reload.
 
 **Shape → Grid size…** sets the cube resolution (3–32 per side, so up
 to 32 768 LEDs). Larger grids look more detailed but are heavier on
@@ -286,8 +296,9 @@ Outside of playback or export the camera is left alone — your manual
 orbit isn't fighting the keyframe system. Adding / deleting any
 frame clears the keyframe map (frame indices would shift).
 
-Keyframes are **session-only** — they aren't saved into the JSON
-project file (yet).
+Keyframes round-trip through the JSON save format: save a project
+with a set of camera keyframes, reopen it later, and the fly-through
+plays exactly as you authored it.
 
 ### LED size slider
 
@@ -449,8 +460,9 @@ four output paths.
 1. Pick an output path. The extension chooses the format:
    - `.mp4` — H.264, CRF 20 (high quality, small files).
    - `.gif` — palette-generated GIF (decent quality, larger files).
-   - `.webm` — currently uses the MP4 encoding args inside a WebM
-     container.
+   - `.webm` — VP9 via `libvpx-vp9`, CRF 30, pure constant-quality
+     (no bitrate cap). Smaller files than MP4 at comparable visual
+     quality.
    - `.png` — PNG sequence: each frame is saved as a numbered file
      (`myanim_0001.png`, `myanim_0002.png`, …) in the chosen
      directory. **Does not need ffmpeg** — `QImage::save` handles
@@ -487,14 +499,19 @@ path to use.
 **File → Save** (`Ctrl+S`) saves to the current path; **Save As…**
 (`Ctrl+Shift+S`) prompts for a new one.
 
-### JSON format (v1.0)
+### JSON format (v1.1)
 
 ```json
 {
-  "version": "1.0",
+  "version": "1.1",
   "shape": "cube",
   "gridSize": 8,
   "fps": 12,
+  "customPositions": [[0, 0, 0], [1, 0, 0], ...],
+  "cameraKeyframes": [
+    { "frame": 0,  "theta": 0.78, "phi": 1.05, "radius": 15.6,
+      "target": [0, 0, 0] }
+  ],
   "frames": [
     { "voxels": { "0,0,0": [255, 0, 0], "1,0,0": [0, 255, 0] } }
   ]
@@ -502,7 +519,14 @@ path to use.
 ```
 
 Voxels are sparse — off LEDs are absent from the map. Hand-editing
-the JSON is supported (and the same wire format Python presets use).
+the JSON is supported (and the same wire format Python scripts use).
+
+`customPositions` only appears when `shape == "custom"` (a mesh
+import); for procedural shapes it's omitted and the mask is
+regenerated from `(shape, gridSize)` on load. `cameraKeyframes` only
+appears when you've authored at least one keyframe. Files saved by
+v1.0 builds (no `version`, or `version == "1.0"`) load fine — the new
+fields default to empty.
 
 ---
 
