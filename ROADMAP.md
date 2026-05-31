@@ -174,14 +174,48 @@
 
 ---
 
+## Phase 11 — Extended shapes + mesh import + cube-aware editor (Complete)
+
+**Goal:** Add three new procedural shapes, accept arbitrary triangle meshes via STL import, and make Python scripts cube-aware so they can declare a preferred grid size and shape.
+
+**Status:** Complete (2026-05-30, commit `c6ee379`)
+
+**Features delivered:**
+
+- **Three new procedural shapes (F-031)** — Torus (donut around Y, major ≈ 62 %, minor ≈ 32 % of cube radius), Ring (hollow cylinder, inner wall at 55 %), Cross (three perpendicular axis-aligned arms, half-thickness ≈ 32 %). Each works at every grid size 3³–32³ via `ShapeMask::testPosition`.
+- **Custom-positions ShapeMask** — new `ShapeType::Custom` plus a vector-of-positions constructor that dedupes + clamps incoming voxel keys and skips the procedural path. Lets the mesh importer produce a mask without inventing a procedural rule.
+- **STL mesh import (F-039)** — new `src/core/MeshImport.{h,cpp}` module. `loadStl()` parses binary or ASCII STL (auto-detected by file-size formula); `voxelise()` point-samples each triangle with sample count proportional to its area in cube space, auto-fitting the mesh into the cube with a 10 % margin. **Shape → Import mesh…** exposes it in the UI.
+- **Cube-aware scripts** — optional `grid_size = N` and `shape = "..."` class attributes on `Preset` / `Animation` subclasses are regex-sniffed at load time (`parseScriptRequirements`). If they differ from the current cube, Scintilla prompts the user to apply them, clearing the timeline. Wired into all three load paths (Run preset, Load preset, Run animation script).
+- **Editor cube label** — Preset editor header gains a grey `Cube N³ <shape> · L LEDs` caption that `MainWindow::applyMask` updates whenever the mask changes.
+- **New-script pre-fill** — **File → New animation script…** inserts the current `grid_size` and `shape` into the new file as class attributes, so a fresh script already targets the active cube.
+
+**Acceptance:** Each of the three new shapes renders cleanly at small (4³) and large (24³) grids. Importing an STL produces a recognisable voxelised silhouette. Loading a script with `grid_size = 25` while on an 8³ cube prompts and switches. Met.
+
+**Known limitation at ship time** (addressed in Phase 12): Custom-shape ShapeMasks round-tripped the shape name but not the voxel positions through the JSON save format.
+
+---
+
+## Phase 12 — Persistence + polish (Complete)
+
+**Goal:** Round-trip the remaining session-only state (camera keyframes, custom-shape voxel positions) through JSON save/load, plus apply two long-standing IMP items.
+
+**Status:** Complete (2026-05-30, commit `ba550a0`)
+
+**Features delivered:**
+
+- **JSON save format bumped to v1.1** (DEC-003 schema extension).
+  - `customPositions`: array of `[x, y, z]` triples, written only when `shape == "custom"`. Round-trips mesh-imported masks that were previously lost on save.
+  - `cameraKeyframes`: array of `{frame, theta, phi, radius, target}` objects, written only when non-empty. Round-trips fly-through keyframes that were previously session-only.
+  - v1.0 files still load — the new fields default to empty.
+  - `CameraKeyframe` extracted to `src/core/CameraKeyframe.h` so `JsonSerializer` can depend on it without inverting the layer relationship with `MainWindow`.
+- **IMP-011 applied** — WebM exports now use `libvpx-vp9 -crf 30 -b:v 0 -pix_fmt yuv420p` instead of the H.264 args that ffmpeg was repurposing into the WebM container. Visually comparable to the MP4 path; smaller files at equivalent quality.
+- **IMP-010 applied** — Fill tool wrapped in `VoxelStrokeCommand`; Ctrl+Z reverts a fill as a single undo step. Identity guard skips cells that already hold the paint colour, keeping the stroke compact.
+
+**Acceptance:** Save a project with custom mesh + camera keyframes, close, reopen — both come back. Export a `.webm` — file plays correctly with VP9. Click Fill, then Ctrl+Z — fill reverts. Met.
+
+---
+
 ## Future phases (uncommitted)
 
-- **Phase 10 — Extended export** (F-034 C-array hardware dump). Renders a frame sequence as a `const uint8_t[]` header for flashing to the original [LED_Cube](https://github.com/Darian-Frey/LED_Cube) 2009 firmware. Format depends on what the firmware expects (bit-packed mono vs RGB per LED, frame stride, byte order); decision is the only blocker.
-- **Phase 11 — Extended shapes** (F-031 torus, ring, cross; F-039 custom imported meshes). Shape mask system is already pluggable.
-- **Phase 12 — Persistence polish** — extend the JSON save format to carry camera keyframes (currently session-only); optional VP9-correct WebM encoding (IMP-011); Fill wrapped in `VoxelStrokeCommand` for proper undo (IMP-010).
+- **Phase 10 — Extended export — deferred.** F-034 C-array hardware dump for the original [LED_Cube](https://github.com/Darian-Frey/LED_Cube) 2009 firmware. Owner declined to revisit the original Arduino project; entry kept for historical completeness but not on the active roadmap.
 - **Phase 13 — Public release** — itch.io / GitHub releases packaging, code signing, demo video, release notes.
-
-**Loose ends in current phases** (tracked in `IMPROVEMENTS.md`):
-
-- IMP-010 — Fill tool not yet wrapped in `VoxelStrokeCommand`; bulk fills skip the undo stack.
-- IMP-011 — WebM container currently feeds H.264 encoder args; a `libvpx-vp9` path would be more correct.
