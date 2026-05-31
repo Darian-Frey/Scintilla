@@ -12,6 +12,10 @@ std::string shapeTypeName(ShapeType s) {
         case ShapeType::Sphere:   return "sphere";
         case ShapeType::Cylinder: return "cylinder";
         case ShapeType::Pyramid:  return "pyramid";
+        case ShapeType::Torus:    return "torus";
+        case ShapeType::Ring:     return "ring";
+        case ShapeType::Cross:    return "cross";
+        case ShapeType::Custom:   return "custom";
     }
     return "cube";
 }
@@ -21,6 +25,10 @@ ShapeType shapeTypeFromName(const std::string& name) {
     if (name == "sphere")   return ShapeType::Sphere;
     if (name == "cylinder") return ShapeType::Cylinder;
     if (name == "pyramid")  return ShapeType::Pyramid;
+    if (name == "torus")    return ShapeType::Torus;
+    if (name == "ring")     return ShapeType::Ring;
+    if (name == "cross")    return ShapeType::Cross;
+    if (name == "custom")   return ShapeType::Custom;
     throw std::invalid_argument("unknown shape: " + name);
 }
 
@@ -33,6 +41,26 @@ ShapeMask::ShapeMask(int gridSize, ShapeType shape)
     : m_gridSize(std::clamp(gridSize, 3, 32))
     , m_shape(shape) {
     build();
+}
+
+ShapeMask::ShapeMask(int gridSize, std::vector<VoxelKey> positions)
+    : m_gridSize(std::clamp(gridSize, 3, 32))
+    , m_shape(ShapeType::Custom) {
+    // Dedupe + clamp incoming positions to the valid grid range. We don't
+    // trust callers (the mesh voxeliser, primarily) to have done it
+    // already, and a bad position downstream would corrupt the index map.
+    std::set<VoxelKey> uniq;
+    for (const VoxelKey& k : positions) {
+        if (k.x < 0 || k.x >= m_gridSize) continue;
+        if (k.y < 0 || k.y >= m_gridSize) continue;
+        if (k.z < 0 || k.z >= m_gridSize) continue;
+        uniq.insert(k);
+    }
+    m_positions.reserve(uniq.size());
+    for (const VoxelKey& k : uniq) {
+        m_indexMap[k] = static_cast<int>(m_positions.size());
+        m_positions.push_back(k);
+    }
 }
 
 void ShapeMask::build() {
@@ -78,6 +106,43 @@ bool ShapeMask::testPosition(int x, int y, int z) const {
             const float hw = (1.0f - t) * c + 0.5f;
             return std::fabs(dx) <= hw && std::fabs(dz) <= hw;
         }
+
+        case ShapeType::Torus: {
+            // Donut centred at the cube centre, with its hole along the
+            // Y axis. Major radius R is the distance from the cube centre
+            // to the centre of the tube; minor radius r is the tube
+            // thickness. Inside the torus iff:
+            //   (sqrt(dx² + dz²) - R)² + dy² ≤ r²
+            const float R     = c * 0.62f;
+            const float r     = c * 0.32f;
+            const float ringR = std::sqrt(dx * dx + dz * dz) - R;
+            return (ringR * ringR + dy * dy) <= (r * r);
+        }
+
+        case ShapeType::Ring: {
+            // Hollow cylinder along the Y axis. Outer wall matches Cylinder;
+            // inner wall removes a coaxial hole through the middle.
+            const float radial = dx * dx + dz * dz;
+            const float innerR = c * 0.55f;
+            return radial <= rSq && radial >= (innerR * innerR);
+        }
+
+        case ShapeType::Cross: {
+            // Three perpendicular arms intersecting at the centre. Each
+            // arm extends the full grid along one axis and is `a` half-
+            // thick across the other two. Inside iff the point lies in
+            // any arm.
+            const float a = c * 0.32f + 0.5f;
+            const bool xArm = std::fabs(dy) <= a && std::fabs(dz) <= a;
+            const bool yArm = std::fabs(dx) <= a && std::fabs(dz) <= a;
+            const bool zArm = std::fabs(dx) <= a && std::fabs(dy) <= a;
+            return xArm || yArm || zArm;
+        }
+
+        case ShapeType::Custom:
+            // Should never reach here — Custom masks are built via the
+            // vector-of-positions constructor and bypass testPosition().
+            return false;
     }
     return false;
 }

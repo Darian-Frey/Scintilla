@@ -12,7 +12,10 @@ enum class ShapeType {
     Sphere,
     Cylinder,
     Pyramid,
-    // v1.1: Torus, Ring
+    Torus,       // donut around the Y axis
+    Ring,        // hollow cylinder along the Y axis
+    Cross,       // three perpendicular axis-aligned arms intersecting at the centre
+    Custom,      // mask built from an external source (e.g. imported mesh)
 };
 
 [[nodiscard]] std::string shapeTypeName(ShapeType s);
@@ -30,6 +33,12 @@ enum class ShapeType {
 class ShapeMask {
 public:
     ShapeMask(int gridSize, ShapeType shape);
+
+    // Custom-shape constructor — caller supplies the explicit set of
+    // addressable voxel positions (typically the result of voxelising an
+    // imported mesh). Sets shape() to ShapeType::Custom and skips the
+    // procedural testPosition() path entirely.
+    ShapeMask(int gridSize, std::vector<VoxelKey> positions);
 
     [[nodiscard]] int gridSize() const { return m_gridSize; }
     [[nodiscard]] ShapeType shape() const { return m_shape; }

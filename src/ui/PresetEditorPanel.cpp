@@ -30,6 +30,13 @@ void PresetEditorPanel::buildLayout() {
     m_pathLabel->setTextInteractionFlags(Qt::TextSelectableByMouse);
     header->addWidget(m_pathLabel, 1);
 
+    m_cubeLabel = new QLabel(this);
+    m_cubeLabel->setStyleSheet(QStringLiteral("color:#888;"));
+    m_cubeLabel->setToolTip(
+        tr("Current cube shape and grid size. Update via Shape menu, or "
+           "declare grid_size / shape attributes in the script."));
+    header->addWidget(m_cubeLabel);
+
     m_runButton = new QPushButton(tr("Run"), this);
     m_runButton->setToolTip(
         tr("Run the script as an animation. The timeline is cleared and "
@@ -107,6 +114,14 @@ void PresetEditorPanel::clearFile() {
     m_saveButton->setEnabled(false);
     m_runButton->setEnabled(false);
     refreshHeader();
+}
+
+void PresetEditorPanel::setCubeInfo(int gridSize, const QString& shape, int ledCount) {
+    if (!m_cubeLabel) return;
+    m_cubeLabel->setText(tr("Cube %1³ %2  ·  %3 LEDs")
+        .arg(gridSize)
+        .arg(shape)
+        .arg(ledCount));
 }
 
 void PresetEditorPanel::save() {

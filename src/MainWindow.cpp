@@ -8,6 +8,7 @@
 #include "ui/SliceControlWidget.h"
 #include "ui/TimelineWidget.h"
 #include "core/JsonSerializer.h"
+#include "core/MeshImport.h"
 #include "core/VoxelStrokeCommand.h"
 #include "audio/AudioReactiveEngine.h"
 #include "audio/AudioDevicePicker.h"
@@ -91,6 +92,40 @@ namespace {
     // subprocess is started.
 
     enum class ScriptType { Unknown, Preset, Animation };
+
+    struct ScriptRequirements {
+        int     gridSize = -1;   // -1 = not declared
+        QString shape;            // empty = not declared
+    };
+
+    // Pulls optional `grid_size = N` and `shape = "..."` class attributes
+    // out of a script file. Used by MainWindow::applyScriptRequirementsIfNeeded
+    // to offer a "switch cube to this shape/size" prompt at load time.
+    // Multiline-anchored to avoid matching local variables embedded in
+    // expression-position code, and tolerant of any indent depth (class
+    // attributes can be at any indent in a nested-class file).
+    ScriptRequirements parseScriptRequirements(const QString& path) {
+        ScriptRequirements out;
+        QFile f(path);
+        if (!f.open(QFile::ReadOnly | QFile::Text)) return out;
+        const QString src = QString::fromUtf8(f.readAll());
+
+        static const QRegularExpression reGrid(
+            QStringLiteral("^\\s*grid_size\\s*=\\s*(\\d+)\\b"),
+            QRegularExpression::MultilineOption);
+        static const QRegularExpression reShape(
+            QStringLiteral("^\\s*shape\\s*=\\s*['\"]([a-z_]+)['\"]"),
+            QRegularExpression::MultilineOption);
+
+        const auto mg = reGrid.match(src);
+        if (mg.hasMatch()) {
+            const int n = mg.captured(1).toInt();
+            if (n >= 3 && n <= 32) out.gridSize = n;
+        }
+        const auto ms = reShape.match(src);
+        if (ms.hasMatch()) out.shape = ms.captured(1);
+        return out;
+    }
 
     ScriptType detectScriptType(const QString& path) {
         QFile f(path);
@@ -301,10 +336,15 @@ void MainWindow::buildMenus() {
     add_shape(tr("&Sphere"),   ShapeType::Sphere,   false);
     add_shape(tr("Cy&linder"), ShapeType::Cylinder, false);
     add_shape(tr("&Pyramid"),  ShapeType::Pyramid,  false);
+    add_shape(tr("&Torus"),    ShapeType::Torus,    false);
+    add_shape(tr("&Ring"),     ShapeType::Ring,     false);
+    add_shape(tr("Cr&oss"),    ShapeType::Cross,    false);
     connect(shapeGroup, &QActionGroup::triggered, this, [this](QAction* a) {
         onShapeChanged(a->data().toInt());
     });
 
+    shape->addSeparator();
+    shape->addAction(tr("&Import mesh…"), this, &MainWindow::onImportMesh);
     shape->addSeparator();
     shape->addAction(tr("&Grid size…"), this, [this]() {
         bool ok = false;
@@ -891,6 +931,43 @@ void MainWindow::onGridSizeChanged(int n) {
     rebuildMask(n, m_mask->shape());
 }
 
+void MainWindow::onImportMesh() {
+    const QString path = QFileDialog::getOpenFileName(
+        this, tr("Import mesh"), QString(),
+        tr("STL meshes (*.stl);;All files (*)"));
+    if (path.isEmpty()) return;
+
+    QString err;
+    const auto tris = MeshImport::loadStl(path, &err);
+    if (tris.empty()) {
+        QMessageBox::warning(this, tr("Import failed"),
+            err.isEmpty() ? tr("No triangles loaded.") : err);
+        return;
+    }
+    if (!confirmDiscardIfDirty(
+            tr("Importing a mesh clears the animation. Continue?"))) {
+        return;
+    }
+
+    const int n = m_mask->gridSize();
+    auto positions = MeshImport::voxelise(tris, n);
+    if (positions.empty()) {
+        QMessageBox::warning(this, tr("Import failed"),
+            tr("Voxelisation produced no LEDs — mesh may be degenerate."));
+        return;
+    }
+
+    m_timeline->clearAll();
+    applyMask(std::make_shared<ShapeMask>(n, std::move(positions)));
+    statusBar()->showMessage(
+        tr("Imported %1 — %2 triangles → %3 LEDs at %4³")
+            .arg(QFileInfo(path).fileName())
+            .arg(tris.size())
+            .arg(m_mask->count())
+            .arg(n),
+        5000);
+}
+
 // ── Internal helpers ─────────────────────────────────────────────────────────
 
 void MainWindow::rebuildMask(int gridSize, ShapeType shape) {
@@ -928,6 +1005,54 @@ void MainWindow::applyMask(std::shared_ptr<ShapeMask> mask) {
                                     QString::fromStdString(shapeTypeName(m_mask->shape())),
                                     m_mask->count());
     }
+    // Surface the active cube to the script editor so the author can see
+    // what they're targeting at a glance.
+    if (m_presetEditor) {
+        m_presetEditor->setCubeInfo(
+            m_mask->gridSize(),
+            QString::fromStdString(shapeTypeName(m_mask->shape())),
+            m_mask->count());
+    }
+}
+
+bool MainWindow::applyScriptRequirementsIfNeeded(const QString& path) {
+    const ScriptRequirements req = parseScriptRequirements(path);
+    if (req.gridSize < 0 && req.shape.isEmpty()) return true;   // nothing declared
+
+    const int     curSize  = m_mask->gridSize();
+    const QString curShape = QString::fromStdString(shapeTypeName(m_mask->shape()));
+
+    const int     wantSize  = req.gridSize > 0 ? req.gridSize : curSize;
+    const QString wantShape = req.shape.isEmpty() ? curShape : req.shape;
+
+    if (wantSize == curSize && wantShape == curShape) return true;  // already matches
+
+    // Validate the shape name before prompting — silently ignore unknown
+    // declarations rather than surfacing a confusing dialog.
+    ShapeType newShape;
+    try {
+        newShape = shapeTypeFromName(wantShape.toStdString());
+    } catch (...) {
+        statusBar()->showMessage(
+            tr("Script declares unknown shape '%1'; ignoring.").arg(wantShape), 4000);
+        return true;
+    }
+
+    const QString message = tr(
+        "%1 declares a target cube (%2³ %3) that differs from the current "
+        "cube (%4³ %5).\n\n"
+        "Apply the script's requirements? This will clear the current animation.")
+        .arg(QFileInfo(path).fileName())
+        .arg(wantSize).arg(wantShape)
+        .arg(curSize).arg(curShape);
+    const auto answer = QMessageBox::question(
+        this, tr("Script requires a different cube"), message,
+        QMessageBox::Apply | QMessageBox::Cancel, QMessageBox::Apply);
+    if (answer != QMessageBox::Apply) return false;
+
+    m_timeline->clearAll();
+    applyMask(std::make_shared<ShapeMask>(wantSize, newShape));
+    return true;
 }
 
 bool MainWindow::confirmDiscardIfDirty(const QString& reason) {
@@ -1055,6 +1180,8 @@ void MainWindow::onRunPreset() {
         runAnimationScript(path);
         return;
     }
+
+    if (!applyScriptRequirementsIfNeeded(path)) return;
 
     if (!confirmDiscardIfDirty(tr("Running a preset appends generated frames to the timeline. Continue?"))) {
         return;
@@ -1268,8 +1395,26 @@ void MainWindow::onNewAnimationScript() {
             tr("%1: %2").arg(templatePath, src.errorString()));
         return;
     }
-    const QByteArray content = src.readAll();
+    QString text = QString::fromUtf8(src.readAll());
     src.close();
+
+    // Pre-fill the new file with grid_size / shape attributes matching
+    // the cube the user is currently working with. The auto-apply path
+    // (applyScriptRequirementsIfNeeded) will then no-op on load instead
+    // of prompting — the values already match — but they're there for
+    // the author to tweak when they redesign for a different cube.
+    const QString needle = QStringLiteral("    tags        = []\n");
+    if (text.contains(needle)) {
+        const QString insertion = QStringLiteral(
+            "    tags        = []\n"
+            "\n"
+            "    # Preferred cube — Scintilla offers to switch to these on load.\n"
+            "    grid_size   = %1\n"
+            "    shape       = \"%2\"\n")
+            .arg(m_mask->gridSize())
+            .arg(QString::fromStdString(shapeTypeName(m_mask->shape())));
+        text.replace(needle, insertion);
+    }
 
     QFile dst(path);
     if (!dst.open(QFile::WriteOnly | QFile::Truncate | QFile::Text)) {
@@ -1277,7 +1422,7 @@ void MainWindow::onNewAnimationScript() {
             tr("%1: %2").arg(path, dst.errorString()));
         return;
     }
-    dst.write(content);
+    dst.write(text.toUtf8());
     dst.close();
 
     // Load into the editor and surface the editor tab so the user starts
@@ -1306,6 +1451,7 @@ void MainWindow::runAnimationScript(const QString& path) {
                 .arg(QFileInfo(path).fileName()));
         return;
     }
+    if (!applyScriptRequirementsIfNeeded(path)) return;
     if (!confirmDiscardIfDirty(
             tr("Running an animation script clears the timeline and replaces it "
                "with the generated frames. Continue?"))) {
@@ -1362,6 +1508,7 @@ void MainWindow::onLoadReactivePreset() {
                 .arg(QFileInfo(path).fileName()));
         return;
     }
+    if (!applyScriptRequirementsIfNeeded(path)) return;
 
     ensurePresetRunner();
     m_presetRunner->setCubeMeta(m_mask->gridSize(),

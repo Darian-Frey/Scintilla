@@ -82,6 +82,7 @@ private slots:
 
     void onShapeChanged(int shapeIndex);
     void onGridSizeChanged(int n);
+    void onImportMesh();
 
     // ── Audio reactive (Phase 3) ─────────────────────────────────────────────
     void onPickAudioDevice();
@@ -133,6 +134,11 @@ private:
     bool confirmDiscardIfDirty(const QString& reason);
     bool saveTo(const QString& path);
     void ensurePresetRunner();   // lazy-construct + wire signals on first use
+
+    // If the script declares `grid_size` / `shape` class attributes that
+    // differ from the current cube, prompt the user to apply them. Returns
+    // false only if the user cancels — true means "proceed with the run".
+    bool applyScriptRequirementsIfNeeded(const QString& path);
 
     CubeViewport*                       m_viewport       = nullptr;
     ColorPickerWidget*                  m_colorPicker    = nullptr;

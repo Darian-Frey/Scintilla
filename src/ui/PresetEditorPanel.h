@@ -24,6 +24,11 @@ public:
     void loadFile(const QString& path);
     void clearFile();
 
+    // Update the small "Cube N³ <shape> · L LEDs" caption in the editor
+    // header so the author can see what cube their script is running on.
+    // Called by MainWindow::applyMask whenever the active mask changes.
+    void setCubeInfo(int gridSize, const QString& shape, int ledCount);
+
     [[nodiscard]] QString filePath() const { return m_path; }
     [[nodiscard]] bool    isDirty()  const { return m_dirty;  }
 
@@ -49,6 +54,7 @@ private:
 
     QPlainTextEdit*    m_editor       = nullptr;
     QLabel*            m_pathLabel    = nullptr;
+    QLabel*            m_cubeLabel    = nullptr;
     QPushButton*       m_saveButton   = nullptr;
     QPushButton*       m_runButton    = nullptr;
     PythonHighlighter* m_highlighter  = nullptr;
