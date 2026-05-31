@@ -1,6 +1,7 @@
 #include "JsonSerializer.h"
 
 #include "AnimationTimeline.h"
+#include "CameraKeyframe.h"
 #include "VoxelFrame.h"
 
 #include <QFile>
@@ -73,12 +74,44 @@ bool readFrame(const QJsonObject& obj, VoxelFrame& out, QString* errorOut) {
 bool JsonSerializer::save(const QString& path,
                           const ShapeMask& mask,
                           const AnimationTimeline& timeline,
+                          const std::map<int, CameraKeyframe>& cameraKeyframes,
                           QString* errorOut) {
     QJsonObject root;
-    root["version"]  = QStringLiteral("1.0");
+    root["version"]  = QStringLiteral("1.1");
     root["shape"]    = QString::fromStdString(shapeTypeName(mask.shape()));
     root["gridSize"] = mask.gridSize();
     root["fps"]      = timeline.fps();
+
+    // Custom-shape voxel positions — only emitted when the mask isn't
+    // procedurally re-derivable from (shape, gridSize).
+    if (mask.shape() == ShapeType::Custom) {
+        QJsonArray positions;
+        for (const VoxelKey& k : mask.positions()) {
+            QJsonArray xyz;
+            xyz.append(k.x); xyz.append(k.y); xyz.append(k.z);
+            positions.append(xyz);
+        }
+        root["customPositions"] = positions;
+    }
+
+    // Camera keyframes — sparse, only the frames the user marked.
+    if (!cameraKeyframes.empty()) {
+        QJsonArray keys;
+        for (const auto& [frame, k] : cameraKeyframes) {
+            QJsonObject obj;
+            obj["frame"]  = frame;
+            obj["theta"]  = static_cast<double>(k.theta);
+            obj["phi"]    = static_cast<double>(k.phi);
+            obj["radius"] = static_cast<double>(k.radius);
+            QJsonArray tgt;
+            tgt.append(static_cast<double>(k.target.x()));
+            tgt.append(static_cast<double>(k.target.y()));
+            tgt.append(static_cast<double>(k.target.z()));
+            obj["target"] = tgt;
+            keys.append(obj);
+        }
+        root["cameraKeyframes"] = keys;
+    }
 
     const double dur = 1.0 / std::max(1, timeline.fps());
     QJsonArray frames;
@@ -136,6 +169,29 @@ LoadResult JsonSerializer::load(const QString& path,
     // FPS
     r.fps = std::clamp(root.value("fps").toInt(12), 1, 60);
 
+    // Camera keyframes — sparse, optional. Frame indices outside the
+    // [0, frameCount-1] range are silently dropped; the timeline check
+    // happens after frames are parsed.
+    if (root.contains("cameraKeyframes")) {
+        for (const QJsonValue& v : root.value("cameraKeyframes").toArray()) {
+            const QJsonObject obj = v.toObject();
+            CameraKeyframe k;
+            const int frame = obj.value("frame").toInt(-1);
+            if (frame < 0) continue;
+            k.theta  = static_cast<float>(obj.value("theta") .toDouble(0.0));
+            k.phi    = static_cast<float>(obj.value("phi")   .toDouble(0.0));
+            k.radius = static_cast<float>(obj.value("radius").toDouble(0.0));
+            const QJsonArray tgt = obj.value("target").toArray();
+            if (tgt.size() == 3) {
+                k.target = QVector3D(
+                    static_cast<float>(tgt[0].toDouble(0.0)),
+                    static_cast<float>(tgt[1].toDouble(0.0)),
+                    static_cast<float>(tgt[2].toDouble(0.0)));
+            }
+            r.cameraKeyframes[frame] = k;
+        }
+    }
+
     // Frames
     const QJsonArray frames = root.value("frames").toArray();
     std::vector<VoxelFrame> parsed;
@@ -150,8 +206,34 @@ LoadResult JsonSerializer::load(const QString& path,
     }
     if (parsed.empty()) parsed.emplace_back();   // invariant: ≥1 frame
 
-    // Apply
-    if (maskOut)     *maskOut = std::make_shared<ShapeMask>(r.gridSize, r.shape);
+    // Drop any keyframes that point past the loaded frame count.
+    while (!r.cameraKeyframes.empty()) {
+        const auto last = std::prev(r.cameraKeyframes.end());
+        if (last->first < static_cast<int>(parsed.size())) break;
+        r.cameraKeyframes.erase(last);
+    }
+
+    // Apply mask — Custom shapes load their explicit voxel list; everything
+    // else regenerates procedurally from (shape, gridSize).
+    if (maskOut) {
+        if (r.shape == ShapeType::Custom) {
+            std::vector<VoxelKey> positions;
+            const QJsonArray arr = root.value("customPositions").toArray();
+            positions.reserve(static_cast<size_t>(arr.size()));
+            for (const QJsonValue& v : arr) {
+                const QJsonArray xyz = v.toArray();
+                if (xyz.size() != 3) continue;
+                positions.push_back(VoxelKey{
+                    xyz[0].toInt(0),
+                    xyz[1].toInt(0),
+                    xyz[2].toInt(0)
+                });
+            }
+            *maskOut = std::make_shared<ShapeMask>(r.gridSize, std::move(positions));
+        } else {
+            *maskOut = std::make_shared<ShapeMask>(r.gridSize, r.shape);
+        }
+    }
     if (timelineOut) {
         timelineOut->setFps(r.fps);
         timelineOut->replaceFrames(std::move(parsed), 0);

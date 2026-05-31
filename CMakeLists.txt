@@ -84,6 +84,7 @@ set(HEADERS
     src/core/VoxelStroke.h
     src/core/VoxelStrokeCommand.h
     src/core/MeshImport.h
+    src/core/CameraKeyframe.h
 
     src/renderer/CubeViewport.h
     src/renderer/OrbitCamera.h

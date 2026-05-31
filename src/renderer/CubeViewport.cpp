@@ -624,15 +624,34 @@ void CubeViewport::applyTool(int instanceIdx) {
 
         case Tool::Fill:
             if (m_timeline) {
+                // Build one VoxelStroke covering every cell the fill
+                // touches so the whole operation is a single undoable
+                // step. Identity guard skips cells that already hold the
+                // paint colour, keeping the stroke compact.
                 auto& frame = m_timeline->currentFrame();
+                VoxelStroke stroke;
+                stroke.frameIndex = m_timeline->currentIndex();
                 for (const auto& p : m_mask->positions()) {
                     if (m_sliceX >= 0 && p.x != m_sliceX) continue;
                     if (m_sliceY >= 0 && p.y != m_sliceY) continue;
                     if (m_sliceZ >= 0 && p.z != m_sliceZ) continue;
+                    const auto cur = frame.get(p.x, p.y, p.z);
+                    if (cur && (*cur)[0] == m_paintColor[0]
+                            && (*cur)[1] == m_paintColor[1]
+                            && (*cur)[2] == m_paintColor[2]) continue;
+                    VoxelChange ch{};
+                    ch.x = p.x; ch.y = p.y; ch.z = p.z;
+                    if (cur) { ch.hadValue = true; ch.oldValue = *cur; }
+                    ch.willHaveValue = true;
+                    ch.newValue      = m_paintColor;
                     frame.set(p.x, p.y, p.z,
                               m_paintColor[0], m_paintColor[1], m_paintColor[2]);
+                    stroke.changes.push_back(ch);
                 }
-                m_timeline->notifyCurrentFrameEdited();
+                if (!stroke.changes.empty()) {
+                    m_timeline->notifyCurrentFrameEdited();
+                    emit strokeCommitted(std::move(stroke));
+                }
             }
             break;
     }

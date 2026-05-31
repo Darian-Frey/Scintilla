@@ -10,6 +10,7 @@
 
 #include "audio/FFTProcessor.h"   // for BandData (used in onReactivePresetBands slot)
 #include "core/AnimationTimeline.h"
+#include "core/CameraKeyframe.h"
 #include "core/ShapeMask.h"
 #include "core/VoxelStroke.h"     // for VoxelStroke (used in onStrokeCommitted slot)
 
@@ -30,18 +31,6 @@ class QUndoStack;
 enum class Tool;
 enum class ReactiveMode;
 enum class ReactiveBlend;
-
-// ── CameraKeyframe ───────────────────────────────────────────────────────────
-//
-// Snapshot of the orbit camera state used by the rotation-keyframe feature.
-// Linearly interpolated between bracketing keyframes during playback and
-// export to produce fly-through animations without scripted motion.
-struct CameraKeyframe {
-    float     theta  = 0.0f;
-    float     phi    = 0.0f;
-    float     radius = 0.0f;
-    QVector3D target;
-};
 
 // ── MainWindow ────────────────────────────────────────────────────────────────
 //

@@ -629,8 +629,9 @@ void MainWindow::onExportAnimation() {
         else if (selectedFilter.contains(QStringLiteral(".png")))  path += QStringLiteral(".png");
         else                                                       path += QStringLiteral(".mp4");
     }
-    const bool isGif = path.endsWith(QStringLiteral(".gif"), Qt::CaseInsensitive);
-    const bool isPng = path.endsWith(QStringLiteral(".png"), Qt::CaseInsensitive);
+    const bool isGif  = path.endsWith(QStringLiteral(".gif"),  Qt::CaseInsensitive);
+    const bool isPng  = path.endsWith(QStringLiteral(".png"),  Qt::CaseInsensitive);
+    const bool isWebm = path.endsWith(QStringLiteral(".webm"), Qt::CaseInsensitive);
 
     // PNG sequence doesn't need ffmpeg — QImage::save handles it directly.
     QString ffmpeg;
@@ -713,7 +714,16 @@ void MainWindow::onExportAnimation() {
             args << QStringLiteral("-vf")
                  << QStringLiteral("split[a][b];[a]palettegen=stats_mode=diff[p];"
                                    "[b][p]paletteuse=dither=bayer:bayer_scale=5:diff_mode=rectangle");
+        } else if (isWebm) {
+            // True WebM via libvpx-vp9. -b:v 0 + -crf 30 gives pure constant-
+            // quality (no bitrate cap); CRF 30 here is roughly comparable
+            // visually to H.264's CRF 20 on the MP4 path.
+            args << QStringLiteral("-c:v")     << QStringLiteral("libvpx-vp9")
+                 << QStringLiteral("-crf")     << QStringLiteral("30")
+                 << QStringLiteral("-b:v")     << QStringLiteral("0")
+                 << QStringLiteral("-pix_fmt") << QStringLiteral("yuv420p");
         } else {
+            // MP4 / H.264.
             args << QStringLiteral("-pix_fmt") << QStringLiteral("yuv420p")
                  << QStringLiteral("-crf")     << QStringLiteral("20");
         }
@@ -881,6 +891,9 @@ void MainWindow::onOpen() {
             this, tr("Grid size clamped"),
             tr("The file requested a grid size larger than 32; clamped to 32 (DEC-005)."));
     }
+    // Project file owns the keyframe map — replace, don't merge. Same
+    // convention as frame data.
+    m_cameraKeyframes = std::move(r.cameraKeyframes);
     applyMask(std::move(newMask));
     m_currentPath = path;
     statusBar()->showMessage(tr("Loaded %1").arg(path), 3000);
@@ -902,7 +915,7 @@ void MainWindow::onSaveAs() {
 
 bool MainWindow::saveTo(const QString& path) {
     QString err;
-    if (!JsonSerializer::save(path, *m_mask, *m_timeline, &err)) {
+    if (!JsonSerializer::save(path, *m_mask, *m_timeline, m_cameraKeyframes, &err)) {
         QMessageBox::warning(this, tr("Save failed"), err);
         return false;
     }
